@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+.venv/
+.venv*/
+env/
+venv/
+ENV/
+
+# Checkpoints & Model Weights (too large for GitHub)
+*.pt
+*.bin
+*.safetensors
+*.pth
+checkpoints/
+checkpoints_*/
+results/*.png
+
+# Datasets (large files)
+*.json
+*.jsonl
+*.txt
+!requirements.txt
+
+# Logs & Pytest
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
