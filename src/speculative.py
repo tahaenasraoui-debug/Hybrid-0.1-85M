@@ -32,11 +32,20 @@ class SpeculativeEngine:
         device: Optional[Union[str, torch.device]] = None,
         max_seq_len: int = 2048,
     ):
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = torch.device(device)
-        self.target_model = target_model.to(self.device)
-        self.draft_model = draft_model.to(self.device)
+        if device is not None:
+            dev = torch.device(device)
+            self.target_model = target_model.to(dev)
+            self.draft_model = draft_model.to(dev)
+            self.target_device = dev
+            self.draft_device = dev
+            self.device = dev
+        else:
+            self.target_model = target_model
+            self.draft_model = draft_model
+            self.target_device = next(target_model.parameters()).device
+            self.draft_device = next(draft_model.parameters()).device
+            self.device = self.draft_device
+
         self.tokenizer = tokenizer
         self.max_seq_len = min(max_seq_len, 2048)
 
@@ -52,6 +61,10 @@ class SpeculativeEngine:
         self, model: Any, input_ids: torch.Tensor, cache: Any
     ) -> Tuple[torch.Tensor, Any]:
         """Unified forward pass handler for SmallLLM and HuggingFace models."""
+        model_device = next(model.parameters()).device
+        if input_ids.device != model_device:
+            input_ids = input_ids.to(model_device)
+
         if hasattr(model, "layers") and hasattr(model, "tok_embeddings"):
             # Native SmallLLM model
             start_pos = KVCacheManager.get_seq_len(cache)
@@ -202,6 +215,7 @@ class SpeculativeEngine:
                 all_target_probs = F.softmax(all_target_logits / temperature, dim=-1)
             else:
                 all_target_probs = all_target_logits
+            all_target_probs = all_target_probs.to(self.draft_device)
 
             # -----------------------------------------------------------------
             # Phase C: Exact Lossless Rejection Sampling (Leviathan et al.)
