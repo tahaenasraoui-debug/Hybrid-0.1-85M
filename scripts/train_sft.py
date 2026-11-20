@@ -12,7 +12,14 @@ Key Advantage:
 import argparse
 import json
 import os
+import sys
 import time
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
@@ -24,39 +31,64 @@ from train import get_lr
 
 
 class SFTDataset(Dataset):
-    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 128):
+    def __init__(self, tokenizer: AutoTokenizer, data_path: str = None, max_seq_len: int = 128):
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
         self.samples = []
 
-        # Load Dolly-15k
-        dolly_path = "dolly_15k.jsonl"
-        if os.path.exists(dolly_path):
-            with open(dolly_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        item = json.loads(line)
-                        inst = item.get("instruction", "")
-                        ctx = item.get("context", "")
-                        resp = item.get("response", "")
-                        user_content = f"{inst}\n{ctx}".strip() if ctx else inst
+        if data_path and os.path.exists(data_path):
+            print(f"Loading custom training data from: {data_path}")
+            if data_path.endswith(".jsonl"):
+                with open(data_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            item = json.loads(line)
+                            inst = item.get("instruction") or item.get("prompt") or ""
+                            ctx = item.get("context", "")
+                            resp = item.get("response") or item.get("output") or item.get("completion") or ""
+                            user_content = f"{inst}\n{ctx}".strip() if ctx else inst
+                            if user_content and resp:
+                                self.samples.append((user_content, resp))
+                        except Exception:
+                            pass
+            elif data_path.endswith(".json"):
+                with open(data_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for item in data:
+                        inst = item.get("instruction") or item.get("prompt") or ""
+                        inp = item.get("input", "")
+                        resp = item.get("output") or item.get("response") or item.get("completion") or ""
+                        user_content = f"{inst}\n{inp}".strip() if inp else inst
                         if user_content and resp:
                             self.samples.append((user_content, resp))
-                    except Exception:
-                        pass
+        else:
+            # Fallback to local default datasets
+            dolly_path = os.path.join(PROJECT_ROOT, "dolly_15k.jsonl")
+            if os.path.exists(dolly_path):
+                with open(dolly_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            item = json.loads(line)
+                            inst = item.get("instruction", "")
+                            ctx = item.get("context", "")
+                            resp = item.get("response", "")
+                            user_content = f"{inst}\n{ctx}".strip() if ctx else inst
+                            if user_content and resp:
+                                self.samples.append((user_content, resp))
+                        except Exception:
+                            pass
 
-        # Load Alpaca-52k
-        alpaca_path = "alpaca_52k.json"
-        if os.path.exists(alpaca_path):
-            with open(alpaca_path, "r", encoding="utf-8") as f:
-                alpaca_data = json.load(f)
-                for item in alpaca_data:
-                    inst = item.get("instruction", "")
-                    inp = item.get("input", "")
-                    resp = item.get("output", "")
-                    user_content = f"{inst}\n{inp}".strip() if inp else inst
-                    if user_content and resp:
-                        self.samples.append((user_content, resp))
+            alpaca_path = os.path.join(PROJECT_ROOT, "alpaca_52k.json")
+            if os.path.exists(alpaca_path):
+                with open(alpaca_path, "r", encoding="utf-8") as f:
+                    alpaca_data = json.load(f)
+                    for item in alpaca_data:
+                        inst = item.get("instruction", "")
+                        inp = item.get("input", "")
+                        resp = item.get("output", "")
+                        user_content = f"{inst}\n{inp}".strip() if inp else inst
+                        if user_content and resp:
+                            self.samples.append((user_content, resp))
 
         print(f"Loaded {len(self.samples):,} conversational instruction samples.")
 
@@ -84,15 +116,26 @@ def collate_padded(batch, pad_id: int = 151643):
 
 def train_sft(
     target_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
+    data_path: str = None,
     output_ckpt: str = "checkpoints_overnight/final_trained_draft_85m.pt",
     max_steps: int = 2500,
     batch_size: int = 4,
+    grad_accum: int = 1,
     learning_rate: float = 5e-4,
+    device: str = None,
 ):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"=== Fast SFT Calibration on {device} ({max_steps} steps) ===")
 
-    tokenizer = AutoTokenizer.from_pretrained(target_name, local_files_only=True)
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(target_name, local_files_only=True)
+    except Exception:
+        try:
+            tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-0.5B-Instruct", local_files_only=True)
+        except Exception:
+            tokenizer = AutoTokenizer.from_pretrained(target_name)
+
     pad_id = getattr(tokenizer, "pad_token_id", 151643) or 151643
 
     draft_cfg = get_qwen_85m_config()
@@ -100,7 +143,7 @@ def train_sft(
 
     optimizer = torch.optim.AdamW(draft.parameters(), lr=learning_rate, weight_decay=0.01)
 
-    dataset = SFTDataset(tokenizer, max_seq_len=128)
+    dataset = SFTDataset(tokenizer, data_path=data_path, max_seq_len=128)
     loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=True, collate_fn=lambda b: collate_padded(b, pad_id)
     )
@@ -115,27 +158,32 @@ def train_sft(
 
     t0 = time.time()
     running_loss = 0.0
+    optimizer.zero_grad()
 
     for step in range(1, max_steps + 1):
-        try:
-            tokens = next(data_iter)
-        except StopIteration:
-            data_iter = iter(loader)
-            tokens = next(data_iter)
+        loss_accum = 0.0
+        for _ in range(grad_accum):
+            try:
+                tokens = next(data_iter)
+            except StopIteration:
+                data_iter = iter(loader)
+                tokens = next(data_iter)
 
-        tokens = tokens.to(device)
-        input_ids = tokens[:, :-1]
-        targets = tokens[:, 1:]
+            tokens = tokens.to(device)
+            input_ids = tokens[:, :-1]
+            targets = tokens[:, 1:]
 
-        logits, _, _ = draft(input_ids)
+            logits, _, _ = draft(input_ids)
 
-        loss = F.cross_entropy(
-            logits.reshape(-1, draft_cfg.vocab_size),
-            targets.reshape(-1),
-            ignore_index=pad_id,
-        )
+            loss = F.cross_entropy(
+                logits.reshape(-1, draft_cfg.vocab_size),
+                targets.reshape(-1),
+                ignore_index=pad_id,
+            )
+            loss_scaled = loss / grad_accum
+            loss_scaled.backward()
+            loss_accum += loss.item() / grad_accum
 
-        loss.backward()
         torch.nn.utils.clip_grad_norm_(draft.parameters(), 1.0)
 
         lr = get_lr(step, train_cfg)
@@ -145,10 +193,11 @@ def train_sft(
         optimizer.step()
         optimizer.zero_grad()
 
-        running_loss += loss.item()
+        running_loss += loss_accum
 
-        if step % 100 == 0:
-            avg_loss = running_loss / 100
+        if step % 50 == 0 or step == 1:
+            divisor = 50 if step > 1 else 1
+            avg_loss = running_loss / divisor
             running_loss = 0.0
             elapsed = time.time() - t0
             steps_per_sec = step / max(0.01, elapsed)
@@ -158,7 +207,7 @@ def train_sft(
                 f"Speed: {steps_per_sec:.1f} steps/s | ETA: {eta_s:.0f}s"
             )
 
-    os.makedirs(os.path.dirname(output_ckpt), exist_ok=True)
+    os.makedirs(os.path.dirname(output_ckpt) or ".", exist_ok=True)
     torch.save(
         {"step": max_steps, "model_state_dict": draft.state_dict(), "loss": avg_loss},
         output_ckpt,
@@ -166,5 +215,37 @@ def train_sft(
     print(f"\n🎉 Saved fully calibrated 85M draft checkpoint to: {output_ckpt}")
 
 
+def main():
+    parser = argparse.ArgumentParser(description="Fast SFT Calibration for 85M Draft Model")
+    parser.add_argument("--data", type=str, default=None, help="Path to custom training dataset (.jsonl or .json)")
+    parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Tokenizer source model")
+    parser.add_argument("--max_steps", type=int, default=2500, help="Number of training steps")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size per forward pass")
+    parser.add_argument("--grad_accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save the trained checkpoint")
+    parser.add_argument("--output", type=str, default=None, help="Exact output path for the checkpoint")
+    parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
+    args = parser.parse_args()
+
+    output_ckpt = args.output
+    if output_ckpt is None:
+        if args.save_dir:
+            output_ckpt = os.path.join(args.save_dir, "final_trained_draft_85m.pt")
+        else:
+            output_ckpt = "checkpoints_overnight/final_trained_draft_85m.pt"
+
+    train_sft(
+        target_name=args.target,
+        data_path=args.data,
+        output_ckpt=output_ckpt,
+        max_steps=args.max_steps,
+        batch_size=args.batch_size,
+        grad_accum=args.grad_accum,
+        learning_rate=args.lr,
+        device=args.device,
+    )
+
+
 if __name__ == "__main__":
-    train_sft()
+    main()
