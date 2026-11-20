@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="Target model (1.5B, 3B, or 7B)")
     parser.add_argument("--checkpoint", type=str, default="checkpoints_overnight/final_trained_draft_85m.pt", help="85M draft weights")
     parser.add_argument("--k", type=int, default=4, help="Draft lookahead window (default: 4)")
+    parser.add_argument("--confidence", type=float, default=0.45, help="Confidence gating threshold (default: 0.45)")
     parser.add_argument("--max_tokens", type=int, default=128, help="Max new tokens")
     parser.add_argument("--prompt", type=str, default="", help="Single prompt test")
     args = parser.parse_args()
@@ -104,6 +105,7 @@ def main():
             max_new_tokens=args.max_tokens,
             k=args.k,
             temperature=0.0,
+            confidence_threshold=args.confidence,
         )
         total_time = time.perf_counter() - t_start
 
