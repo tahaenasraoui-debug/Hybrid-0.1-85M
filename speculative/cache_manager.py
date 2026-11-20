@@ -35,11 +35,13 @@ class KVCacheManager:
             if cache.key_cache[0] is not None:
                 return cache.key_cache[0].shape[-2]
 
-        # Native list of (k, v) tuples: shape (batch, n_heads, seq_len, head_dim)
+        # Native list or tuple of (k, v) tuples: shape (batch, n_heads, seq_len, head_dim)
         if isinstance(cache, (list, tuple)) and len(cache) > 0:
-            k, _ = cache[0]
-            if k is not None:
-                return k.shape[-2]
+            first_layer = cache[0]
+            if isinstance(first_layer, (list, tuple)) and len(first_layer) > 0:
+                k = first_layer[0]
+                if k is not None and hasattr(k, "shape") and len(k.shape) >= 3:
+                    return k.shape[-2]
 
         return 0
 
@@ -49,33 +51,31 @@ class KVCacheManager:
         Truncates the cache down to target_len in-place or returns a truncated copy.
         Guarantees no state leakage from rejected candidate tokens.
         """
-        if cache is None or target_len <= 0:
+        if cache is None or target_len < 0:
             return cache
 
         current_len = KVCacheManager.get_seq_len(cache)
         if current_len <= target_len:
             return cache
 
-        tokens_to_remove = target_len - current_len  # Negative integer
-
         # Hugging Face DynamicCache (Transformers 4.36+ / 5.x)
+        # DynamicCache.crop(max_length: int) takes absolute target length (max_length >= 0).
         if hasattr(cache, "crop"):
             try:
-                # Transformers 5.x takes negative tokens_to_remove
-                cache.crop(tokens_to_remove)
-                return cache
-            except TypeError:
-                try:
-                    # In case of older crop(target_len)
-                    cache.crop(target_len)
+                cache.crop(target_len)
+                if KVCacheManager.get_seq_len(cache) == target_len:
                     return cache
-                except Exception:
-                    pass
+            except Exception:
+                pass
+            try:
+                cache.crop(target_len - current_len)
+                if KVCacheManager.get_seq_len(cache) == target_len:
+                    return cache
             except Exception:
                 pass
 
         # Direct attribute manipulation fallback for HuggingFace DynamicCache
-        if hasattr(cache, "layers"):
+        if hasattr(cache, "layers") and len(cache.layers) > 0:
             for layer in cache.layers:
                 if hasattr(layer, "keys") and layer.keys is not None:
                     layer.keys = layer.keys[..., :target_len, :].contiguous()
@@ -83,7 +83,7 @@ class KVCacheManager:
                     layer.values = layer.values[..., :target_len, :].contiguous()
             return cache
 
-        if hasattr(cache, "key_cache"):
+        if hasattr(cache, "key_cache") and len(cache.key_cache) > 0:
             for idx in range(len(cache.key_cache)):
                 if cache.key_cache[idx] is not None:
                     cache.key_cache[idx] = cache.key_cache[idx][..., :target_len, :].contiguous()
@@ -91,17 +91,18 @@ class KVCacheManager:
                     cache.value_cache[idx] = cache.value_cache[idx][..., :target_len, :].contiguous()
             return cache
 
-        # Native list of (k, v) tuples
-        if isinstance(cache, list):
+        # Native list or tuple of (k, v) tuples
+        if isinstance(cache, (list, tuple)):
             new_cache = []
             for item in cache:
-                if item is not None and isinstance(item, tuple):
+                if item is not None and isinstance(item, (list, tuple)) and len(item) == 2:
                     k, v = item
                     new_k = k[..., :target_len, :].contiguous()
                     new_v = v[..., :target_len, :].contiguous()
-                    new_cache.append((new_k, new_v))
+                    new_cache.append((new_k, new_v) if isinstance(item, tuple) else [new_k, new_v])
                 else:
                     new_cache.append(item)
-            return new_cache
+            truncated = tuple(new_cache) if isinstance(cache, tuple) else new_cache
+            return truncated
 
         return cache

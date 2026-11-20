@@ -113,7 +113,12 @@ class SpeculativeEngine:
 
         # 2. Prefill Phase (Single forward pass on prompt for both models)
         target_logits, target_cache = self._forward(self.target_model, input_tensor, None)
-        draft_logits, draft_cache = self._forward(self.draft_model, input_tensor, None)
+        if self.draft_model is self.target_model:
+            draft_logits = target_logits
+            import copy
+            draft_cache = copy.deepcopy(target_cache)
+        else:
+            draft_logits, draft_cache = self._forward(self.draft_model, input_tensor, None)
 
         curr_target_logits = target_logits[0, -1, :]
         curr_draft_logits = draft_logits[0, -1, :]
@@ -304,7 +309,12 @@ class SpeculativeEngine:
             final_tensor = torch.tensor([[final_token]], dtype=torch.long, device=self.device)
 
             target_out_final, target_cache = self._forward(self.target_model, final_tensor, target_cache)
-            draft_out_final, draft_cache = self._forward(self.draft_model, final_tensor, draft_cache)
+            if self.draft_model is self.target_model:
+                draft_out_final = target_out_final
+                import copy
+                draft_cache = copy.deepcopy(target_cache)
+            else:
+                draft_out_final, draft_cache = self._forward(self.draft_model, final_tensor, draft_cache)
             target_forward_passes += 1
 
             curr_target_logits = target_out_final[0, -1, :]

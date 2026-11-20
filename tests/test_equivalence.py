@@ -176,3 +176,202 @@ def test_kv_cache_rollback_integrity(setup_models):
     assert torch.allclose(cached_last_logit, fresh_last_logit, atol=1e-4), (
         f"KV cache rollback integrity failed! Max absolute diff: {diff:.6f} > 1e-4"
     )
+
+
+def test_self_draft_equivalence_small_llm(setup_models):
+    """
+    Self-Draft Test on SmallLLM:
+    When target_model == draft_model at temperature=0.0:
+    1. Acceptance rate MUST be 100% (num_accepted == num_drafted).
+    2. Generated sequence MUST match plain autoregressive generation 100% token-for-token.
+    """
+    target_model, _, tokenizer = setup_models
+    engine = SpeculativeEngine(
+        target_model=target_model,
+        draft_model=target_model,
+        tokenizer=tokenizer,
+        device="cpu",
+    )
+
+    test_prompts = [
+        "Self drafting invariant test with small llm model.",
+        "Deterministic acceptance rate should always equal 1.0.",
+        "Deepcopy ensures cache isolation between target and draft states.",
+    ]
+
+    for p in test_prompts:
+        prompt_ids = tokenizer.encode(p, add_bos=True)
+        max_tokens = 20
+
+        # Ground truth autoregressive generation
+        expected_ids = plain_autoregressive_generate(target_model, prompt_ids, max_new_tokens=max_tokens)
+
+        for k_val in [2, 3, 4, 5]:
+            res = engine.generate(prompt=prompt_ids, max_new_tokens=max_tokens, k=k_val, temperature=0.0)
+            assert res["num_drafted"] == res["num_accepted"], (
+                f"Self-draft failed 100% acceptance on prompt '{p}' with k={k_val}: "
+                f"drafted={res['num_drafted']}, accepted={res['num_accepted']}"
+            )
+            assert res["acceptance_rate"] == 1.0
+            assert res["generated_ids"] == expected_ids, (
+                f"Self-draft tokens did not match ground truth on prompt '{p}' with k={k_val}!\n"
+                f"Expected: {expected_ids}\n"
+                f"Got:      {res['generated_ids']}"
+            )
+
+
+def test_self_draft_equivalence_qwen():
+    """
+    Self-Draft Test on HuggingFace Qwen2.5-0.5B-Instruct:
+    When target_model == draft_model at temperature=0.0:
+    1. Acceptance rate MUST be 100% (num_accepted == num_drafted).
+    2. Generated sequence MUST match HuggingFace model.generate() at repetition_penalty=1.0.
+    """
+    import os
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            dtype=torch.float32,
+            device_map="cpu",
+            local_files_only=True,
+        )
+        model.eval()
+    except Exception as e:
+        pytest.skip(f"Qwen checkpoint not available locally: {e}")
+
+    prompt = "Speculative decoding achieves lossless acceleration by"
+    prompt_ids = tokenizer.encode(prompt, add_special_tokens=True)
+    input_ids = torch.tensor([prompt_ids])
+    max_tokens = 20
+
+    # Hugging Face ground truth with repetition_penalty=1.0 (pure greedy equivalence)
+    with torch.no_grad():
+        hf_out = model.generate(
+            input_ids,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            repetition_penalty=1.0,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    expected_ids = hf_out[0, len(prompt_ids):].tolist()
+
+    # Speculative Engine with self-drafting (target == draft)
+    engine = SpeculativeEngine(
+        target_model=model,
+        draft_model=model,
+        tokenizer=tokenizer,
+        device="cpu",
+    )
+    res = engine.generate(prompt=prompt_ids, max_new_tokens=max_tokens, k=4, temperature=0.0)
+
+    assert res["num_drafted"] == res["num_accepted"], (
+        f"Qwen self-draft failed 100% acceptance: drafted={res['num_drafted']}, accepted={res['num_accepted']}"
+    )
+    assert res["acceptance_rate"] == 1.0
+    assert res["generated_ids"] == expected_ids, (
+        f"Qwen self-draft mismatch!\nExpected: {expected_ids}\nGot:      {res['generated_ids']}"
+    )
+
+
+def test_hf_dynamic_cache_rollback_integrity():
+    """
+    Asserts that HuggingFace DynamicCache rollback cleanly removes speculative candidate tokens
+    and produces subsequent logits identical to a fresh forward pass within atol=1e-4.
+    """
+    import os
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    model_id = "Qwen/Qwen2.5-0.5B-Instruct"
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_id, local_files_only=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            dtype=torch.float32,
+            device_map="cpu",
+            local_files_only=True,
+        )
+        model.eval()
+    except Exception as e:
+        pytest.skip(f"Qwen checkpoint not available locally: {e}")
+
+    prompt = "Large language models use key-value caches during generation."
+    prompt_ids = tokenizer.encode(prompt, add_special_tokens=True)
+    input_ids = torch.tensor([prompt_ids])
+
+    # 1. Prefill
+    with torch.no_grad():
+        out_prefill = model(input_ids, use_cache=True)
+    cache = out_prefill.past_key_values
+    base_len = KVCacheManager.get_seq_len(cache)
+
+    # 2. Add 5 candidate tokens
+    draft_tokens = [150, 250, 350, 450, 550]
+    draft_tensor = torch.tensor([draft_tokens])
+    with torch.no_grad():
+        out_draft = model(draft_tensor, past_key_values=cache, use_cache=True)
+    cache = out_draft.past_key_values
+    assert KVCacheManager.get_seq_len(cache) == base_len + 5
+
+    # 3. Truncate back to base_len + 2
+    target_truncated_len = base_len + 2
+    cache = KVCacheManager.truncate_cache(cache, target_truncated_len)
+    assert KVCacheManager.get_seq_len(cache) == target_truncated_len
+
+    # 4. Forward next token using rolled-back cache
+    next_token = 888
+    next_tensor = torch.tensor([[next_token]])
+    with torch.no_grad():
+        out_cached = model(next_tensor, past_key_values=cache, use_cache=True)
+    cached_logits = out_cached.logits[0, -1, :]
+
+    # 5. Fresh forward pass from scratch
+    fresh_seq = prompt_ids + draft_tokens[:2] + [next_token]
+    with torch.no_grad():
+        out_fresh = model(torch.tensor([fresh_seq]), use_cache=False)
+    fresh_logits = out_fresh.logits[0, -1, :]
+
+    diff = torch.max(torch.abs(cached_logits - fresh_logits)).item()
+    assert torch.allclose(cached_logits, fresh_logits, atol=1e-4), (
+        f"DynamicCache rollback failed! Max diff: {diff:.6f} > 1e-4"
+    )
+
+
+def test_tuple_kv_cache_truncation():
+    """
+    Verifies that KVCacheManager.truncate_cache correctly handles tuple-of-tuples
+    structures used by native PyTorch and legacy HuggingFace caches.
+    """
+    n_layers = 4
+    batch_size = 1
+    n_heads = 4
+    head_dim = 32
+    seq_len = 16
+    target_len = 9
+
+    fake_cache = tuple(
+        (
+            torch.randn(batch_size, n_heads, seq_len, head_dim),
+            torch.randn(batch_size, n_heads, seq_len, head_dim),
+        )
+        for _ in range(n_layers)
+    )
+
+    assert KVCacheManager.get_seq_len(fake_cache) == seq_len
+
+    truncated = KVCacheManager.truncate_cache(fake_cache, target_len)
+    assert isinstance(truncated, tuple)
+    assert len(truncated) == n_layers
+    assert KVCacheManager.get_seq_len(truncated) == target_len
+
+    for layer_k, layer_v in truncated:
+        assert layer_k.shape == (batch_size, n_heads, target_len, head_dim)
+        assert layer_v.shape == (batch_size, n_heads, target_len, head_dim)
+
