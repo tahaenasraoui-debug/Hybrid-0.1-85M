@@ -20,6 +20,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
@@ -138,10 +140,27 @@ def train_sft(
 
     pad_id = getattr(tokenizer, "pad_token_id", 151643) or 151643
 
+    if device == "cuda":
+        torch.cuda.empty_cache()
+
     draft_cfg = get_qwen_85m_config()
     draft = SmallLLM(draft_cfg).to(device).train()
 
-    optimizer = torch.optim.AdamW(draft.parameters(), lr=learning_rate, weight_decay=0.01)
+    # Use 8-bit AdamW to save ~500MB VRAM on 3GB GPUs
+    use_bnb = False
+    if device == "cuda":
+        try:
+            import bitsandbytes as bnb
+            optimizer = bnb.optim.AdamW8bit(draft.parameters(), lr=learning_rate, weight_decay=0.01)
+            use_bnb = True
+            print("Using 8-bit AdamW optimizer (conserves ~500MB VRAM).")
+        except Exception:
+            pass
+    if not use_bnb:
+        optimizer = torch.optim.AdamW(draft.parameters(), lr=learning_rate, weight_decay=0.01)
+
+    use_amp = (device == "cuda")
+    scaler = torch.amp.GradScaler(enabled=use_amp)
 
     dataset = SFTDataset(tokenizer, data_path=data_path, max_seq_len=128)
     loader = DataLoader(
@@ -173,24 +192,27 @@ def train_sft(
             input_ids = tokens[:, :-1]
             targets = tokens[:, 1:]
 
-            logits, _, _ = draft(input_ids)
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
+                logits, _, _ = draft(input_ids)
+                loss = F.cross_entropy(
+                    logits.reshape(-1, draft_cfg.vocab_size).float(),
+                    targets.reshape(-1),
+                    ignore_index=pad_id,
+                )
+                loss_scaled = loss / grad_accum
 
-            loss = F.cross_entropy(
-                logits.reshape(-1, draft_cfg.vocab_size),
-                targets.reshape(-1),
-                ignore_index=pad_id,
-            )
-            loss_scaled = loss / grad_accum
-            loss_scaled.backward()
+            scaler.scale(loss_scaled).backward()
             loss_accum += loss.item() / grad_accum
 
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(draft.parameters(), 1.0)
 
         lr = get_lr(step, train_cfg)
         for g in optimizer.param_groups:
             g["lr"] = lr
 
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
 
         running_loss += loss_accum
@@ -220,8 +242,8 @@ def main():
     parser.add_argument("--data", type=str, default=None, help="Path to custom training dataset (.jsonl or .json)")
     parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Tokenizer source model")
     parser.add_argument("--max_steps", type=int, default=2500, help="Number of training steps")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size per forward pass")
-    parser.add_argument("--grad_accum", type=int, default=1, help="Gradient accumulation steps")
+    parser.add_argument("--batch_size", type=int, default=2, help="Batch size per forward pass (default: 2)")
+    parser.add_argument("--grad_accum", type=int, default=16, help="Gradient accumulation steps (default: 16)")
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
     parser.add_argument("--save_dir", type=str, default=None, help="Directory to save the trained checkpoint")
     parser.add_argument("--output", type=str, default=None, help="Exact output path for the checkpoint")
