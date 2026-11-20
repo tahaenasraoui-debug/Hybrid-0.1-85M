@@ -17,14 +17,14 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 from config import get_qwen_85m_config
 from model import SmallLLM
-from speculative.engine import SpeculativeDecodingEngine
+from src.speculative import SpeculativeEngine
 from train import get_compatible_device
 
 
 def main():
     parser = argparse.ArgumentParser(description="Speculative Decoding Chat with Qwen and 85M Draft")
     parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Target teacher model")
-    parser.add_argument("--checkpoint", type=str, default="./checkpoints_overnight/latest_draft.pt", help="85M draft checkpoint")
+    parser.add_argument("--checkpoint", type=str, default="./checkpoints_overnight/final_trained_draft_85m.pt", help="85M draft checkpoint")
     parser.add_argument("--k", type=int, default=5, help="Draft length K (default: 5)")
     parser.add_argument("--temp", type=float, default=0.0, help="Sampling temperature (0.0 for greedy)")
     parser.add_argument("--max_tokens", type=int, default=128, help="Max new tokens to generate")
@@ -82,9 +82,9 @@ def main():
     draft_model.eval()
 
     # 4. Initialize Speculative Decoding Engine
-    engine = SpeculativeDecodingEngine(
-        draft_model=draft_model,
+    engine = SpeculativeEngine(
         target_model=target_model,
+        draft_model=draft_model,
         tokenizer=tokenizer,
         device=device,
     )
@@ -103,14 +103,14 @@ def main():
         result = engine.generate(
             prompt=formatted_prompt,
             max_new_tokens=args.max_tokens,
-            K=args.k,
+            k=args.k,
             temperature=args.temp,
-            confidence_threshold=0.6,
+            confidence_threshold=0.5,
         )
-        total_time = time.perf_counter() - t0
+        total_time = result.get("wall_time_s", time.perf_counter() - t0)
 
-        tokens_generated = len(result["generated_ids"])
-        tok_per_sec = tokens_generated / max(1e-4, total_time)
+        tokens_generated = result["num_generated"]
+        tok_per_sec = result["tokens_per_sec"]
 
         print("-" * 60)
         print("Response:")
@@ -119,8 +119,8 @@ def main():
         print(f"Speculative Decoding Stats:")
         print(f" • Tokens Generated:     {tokens_generated} tokens")
         print(f" • Total Time:           {total_time:.2f}s ({tok_per_sec:.1f} tok/s)")
-        print(f" • Verification Passes:  {result['num_forward_passes']}")
-        print(f" • Token Acceptance (τ): {result['mean_tau']:.2f} tokens / verification step")
+        print(f" • Verification Passes:  {result['target_forward_passes']}")
+        print(f" • Token Acceptance (τ): {result['mean_accepted_per_step']:.2f} tokens / verification step")
         print(f" • Acceptance Rate:      {result['acceptance_rate'] * 100:.1f}%")
         print("-" * 60 + "\n")
 
