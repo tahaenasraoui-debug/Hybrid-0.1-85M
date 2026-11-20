@@ -229,6 +229,17 @@ def train_sft(
                 f"Speed: {steps_per_sec:.1f} steps/s | ETA: {eta_s:.0f}s"
             )
 
+        # Periodic checkpoint every 1,000 steps so progress is never lost
+        if step % 1000 == 0:
+            checkpoint_dir = os.path.dirname(output_ckpt) or "."
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            step_ckpt = os.path.join(checkpoint_dir, f"checkpoint_step_{step:05d}.pt")
+            latest_ckpt = os.path.join(checkpoint_dir, "latest_draft.pt")
+            payload = {"step": step, "model_state_dict": draft.state_dict(), "loss": avg_loss}
+            torch.save(payload, step_ckpt)
+            torch.save(payload, latest_ckpt)
+            print(f" -> [Checkpoint Auto-Saved] Step {step} -> {latest_ckpt}")
+
     os.makedirs(os.path.dirname(output_ckpt) or ".", exist_ok=True)
     torch.save(
         {"step": max_steps, "model_state_dict": draft.state_dict(), "loss": avg_loss},
