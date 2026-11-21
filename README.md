@@ -10,7 +10,7 @@ A production-grade, mathematically lossless **Speculative Decoding Engine** and 
 
 ---
 
-## 🏛️ 1. Architecture & Scope Disclosure
+##  1. Architecture & Scope Disclosure
 
 ### Scope Honesty
 * **Target Model (`Qwen/Qwen3-1.7B` / `Qwen2.5`):** Pretrained weights sourced from the official Qwen family (28 layers, 16 Q / 8 KV GQA heads, 32K context). Loaded in 4-bit NF4 (`BitsAndBytesConfig`) to guarantee total resident GPU memory remains strictly under **2.8 GB** on a 3 GB VRAM consumer card (NVIDIA GTX 1050 Mobile).
@@ -23,7 +23,7 @@ A production-grade, mathematically lossless **Speculative Decoding Engine** and 
 
 ---
 
-## 🔁 2. Distillation Pipeline (`scripts/distill.py`)
+##  2. Distillation Pipeline (`scripts/distill.py`)
 
 To maximize speculative token acceptance ($\alpha$), the 85M draft model is distilled against the target teacher model over curated conversational instruction datasets (Alpaca + Dolly-15k).
 
@@ -47,7 +47,7 @@ tokenizer.apply_chat_template(
 
 ---
 
-## ⚡ 3. Speculative Decoding Engine (`src/speculative.py`) — Strict Invariants
+##  3. Speculative Decoding Engine (`src/speculative.py`) — Strict Invariants
 
 ### 1. VRAM Guardrail (< 2.8 GB Resident Memory)
 * Target model loaded in **4-bit NF4** (`~1.0 GB`).
@@ -81,7 +81,7 @@ When token $i \le k$ is rejected:
 
 ---
 
-## 🧪 4. Mandatory Verification Suite (`tests/test_equivalence.py`)
+##  4. Mandatory Verification Suite (`tests/test_equivalence.py`)
 
 All invariants are formally verified under automated `pytest` test suites:
 
@@ -94,7 +94,7 @@ PYTHONPATH=. pytest tests/test_equivalence.py -v
 
 ---
 
-## 📊 5. Empirical Benchmarking Suite (`benchmarks/run_bench.py`)
+##  5. Empirical Benchmarking Suite (`benchmarks/run_bench.py`)
 
 ### Test Configuration
 * **Hardware:** NVIDIA GeForce GTX 1050 Mobile (3 GB VRAM, Pascal `sm_61`), Intel i5-9300H, 16 GB RAM.
@@ -121,7 +121,7 @@ As noted in the project specification and the literature (Leviathan et al., 2023
 
 ---
 
-## 🚀 Quickstart
+##  Quickstart
 
 ### 1. Installation
 ```bash
