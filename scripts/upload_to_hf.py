@@ -108,23 +108,6 @@ output = engine.generate("Explain how quantum computing works.", k=4)
 print(output["text"])
 ```
 """
-- **Activations:** SwiGLU (hidden_dim = 1280)
-- **Positional Encoding:** RoPE (theta = 1,000,000)
-- **Tokenizer:** Exact Qwen2.5 Byte-Pair Encoding (`vocab_size = 151,936`, tied embeddings)
-- **Training:** SFT on 67,000 conversational instruction pairs (15,000 steps, final loss: 1.01)
-
-## Speculative Decoding Usage
-Pair with `Qwen2.5-1.5B` or `Qwen2.5-7B` for **2x–3x lossless speedup**:
-```python
-from src.speculative import SpeculativeEngine
-from model import SmallLLM
-import torch
-
-# Load draft weights
-checkpoint = torch.load("final_trained_draft_85m.pt", map_location="cuda")
-# Run lossless speculative decoding with Qwen
-```
-"""
     hf_readme_file = os.path.join(PROJECT_ROOT, "HF_MODEL_CARD.md")
     with open(hf_readme_file, "w") as f:
         f.write(hf_readme)
