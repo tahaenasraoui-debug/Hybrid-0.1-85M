@@ -17,6 +17,14 @@ import os
 import sys
 import time
 from typing import Any, Dict, List
+
+# Ensure project root is in sys.path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
@@ -156,13 +164,15 @@ def run_speculative_benchmarks(
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct")
-    parser.add_argument("--checkpoint", type=str, default="./checkpoints_overnight/final_trained_draft_85m.pt")
-    parser.add_argument("--max_tokens", type=int, default=64)
+    parser = argparse.ArgumentParser(description="Benchmarking Suite for Speculative Decoding")
+    parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Target model identifier or path")
+    parser.add_argument("--checkpoint", type=str, default="./checkpoints_overnight/final_trained_draft_85m.pt", help="Path to 85M draft weights")
+    parser.add_argument("--max_tokens", type=int, default=64, help="Max tokens to generate per prompt")
+    parser.add_argument("--device", type=str, default=None, help="Device to benchmark on (cuda or cpu)")
+    parser.add_argument("--k_values", type=int, nargs="+", default=[2, 3, 4, 5, 6], help="List of lookahead k values")
     args = parser.parse_args()
 
-    device = str(get_compatible_device())
+    device = args.device or str(get_compatible_device())
     print(f"============================================================")
     print(f"  Speculative Decoding Empirical Benchmarks")
     print(f"  Target: {args.target} | Device: {device}")
@@ -217,7 +227,7 @@ def main():
         draft_model,
         tokenizer,
         BENCHMARK_PROMPTS,
-        k_values=[2, 3, 4, 5, 6],
+        k_values=args.k_values,
         max_new_tokens=args.max_tokens,
         device=device,
     )
