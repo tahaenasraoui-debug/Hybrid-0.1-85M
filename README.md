@@ -125,8 +125,8 @@ As noted in the project specification and the literature (Leviathan et al., 2023
 
 ### 1. Installation
 ```bash
-git clone https://github.com/YOUR_USERNAME/lossless-speculative-decoding.git
-cd lossless-speculative-decoding
+git clone https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M.git
+cd Hybrid-0.1-85M
 
 # Setup Python 3.12 environment
 uv venv --python 3.12 .venv
