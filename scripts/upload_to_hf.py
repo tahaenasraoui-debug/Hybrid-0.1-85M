@@ -72,6 +72,8 @@ pipeline_tag: text-generation
 
 When paired in a heterogeneous speculative decoding setup (running Hybrid-0.1-85M on GPU and Qwen2.5 on CPU/GPU), it delivers **2x–3x real-world acceleration** with 100% mathematical output fidelity.
 
+- **GitHub Repository & Code:** [https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M)
+
 ## Architecture & Specifications
 - **Model Name:** Hybrid-0.1-85M
 - **Parameters:** ~85,000,000 (85M)

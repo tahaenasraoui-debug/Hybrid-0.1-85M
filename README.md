@@ -8,6 +8,10 @@
 
 A production-grade, mathematically lossless **Speculative Decoding Engine** and custom **Hybrid-0.1-85M Causal Transformer** built from scratch in PyTorch — with **zero high-level `model.generate()` wrappers**.
 
+> 📦 **Model Weights on Hugging Face:** [`Tahary/Hybrid-0.1-85M`](https://huggingface.co/Tahary/Hybrid-0.1-85M)
+> 
+> ⚡ **GitHub Codebase:** [`tahaenasraoui-debug/Hybrid-0.1-85M`](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M)
+
 ---
 
 ##  1. Architecture & Scope Disclosure
