@@ -147,7 +147,7 @@ print(output["text"])
     if os.path.exists(hf_readme_file):
         os.remove(hf_readme_file)
 
-    print(f"\n🎉 Deployment Complete! Your model is live at: https://huggingface.co/{repo_id}")
+    print(f"\n[DONE] Deployment Complete! Your model is live at: https://huggingface.co/{repo_id}")
 
 
 def main():

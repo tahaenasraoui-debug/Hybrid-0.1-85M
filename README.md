@@ -8,13 +8,13 @@
 
 A production-grade, mathematically lossless **Speculative Decoding Engine** and custom **Hybrid-0.1-85M Causal Transformer** built from scratch in PyTorch — with **zero high-level `model.generate()` wrappers**.
 
-> 📦 **Model Weights on Hugging Face:** [`Tahary/Hybrid-0.1-85M`](https://huggingface.co/Tahary/Hybrid-0.1-85M)
+> **Model Weights on Hugging Face:** [`Tahary/Hybrid-0.1-85M`](https://huggingface.co/Tahary/Hybrid-0.1-85M)
 > 
-> ⚡ **GitHub Codebase:** [`tahaenasraoui-debug/Hybrid-0.1-85M`](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M)
+> **GitHub Codebase:** [`tahaenasraoui-debug/Hybrid-0.1-85M`](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M)
 
 ---
 
-##  1. Architecture & Scope Disclosure
+## 1. Architecture & Scope Disclosure
 
 ### Scope Honesty
 * **Target Model (`Qwen/Qwen3-1.7B` / `Qwen2.5`):** Pretrained weights sourced from the official Qwen family (28 layers, 16 Q / 8 KV GQA heads, 32K context). Loaded in 4-bit NF4 (`BitsAndBytesConfig`) to guarantee total resident GPU memory remains strictly under **2.8 GB** on a 3 GB VRAM consumer card (NVIDIA GTX 1050 Mobile).
@@ -27,7 +27,7 @@ A production-grade, mathematically lossless **Speculative Decoding Engine** and 
 
 ---
 
-##  2. Distillation Pipeline (`scripts/distill.py`)
+## 2. Distillation Pipeline (`scripts/distill.py`)
 
 To maximize speculative token acceptance ($\alpha$), the 85M draft model is distilled against the target teacher model over curated conversational instruction datasets (Alpaca + Dolly-15k).
 
@@ -51,7 +51,7 @@ tokenizer.apply_chat_template(
 
 ---
 
-##  3. Speculative Decoding Engine (`src/speculative.py`) — Strict Invariants
+## 3. Speculative Decoding Engine (`src/speculative.py`) — Strict Invariants
 
 ### 1. VRAM Guardrail (< 2.8 GB Resident Memory)
 * Target model loaded in **4-bit NF4** (`~1.0 GB`).
@@ -85,7 +85,7 @@ When token $i \le k$ is rejected:
 
 ---
 
-##  4. Mandatory Verification Suite (`tests/test_equivalence.py`)
+## 4. Mandatory Verification Suite (`tests/test_equivalence.py`)
 
 All invariants are formally verified under automated `pytest` test suites:
 
@@ -98,7 +98,7 @@ PYTHONPATH=. pytest tests/test_equivalence.py -v
 
 ---
 
-##  5. Empirical Benchmarking Suite (`benchmarks/run_bench.py`)
+## 5. Empirical Benchmarking Suite (`benchmarks/run_bench.py`)
 
 ### Test Configuration
 * **Hardware:** NVIDIA GeForce GTX 1050 Mobile (3 GB VRAM, Pascal `sm_61`), Intel i5-9300H, 16 GB RAM.
@@ -117,7 +117,7 @@ PYTHONPATH=. pytest tests/test_equivalence.py -v
 | **Speculative Decoding** | $k=5$ | 2.05 tok/s | 0.19× | 1.0% | 0.03 tok/step |
 | **Speculative Decoding** | $k=6$ | 1.78 tok/s | 0.16× | 0.9% | 0.03 tok/step |
 
-### 🔍 Scientific Analysis: Why Speedup is $< 1.0\times$ on Small Targets
+### Scientific Analysis: Why Speedup is < 1.0x on Small Targets
 As noted in the project specification and the literature (Leviathan et al., 2023; Chen et al., 2023):
 1. **Target Forward Latency:** A small target model (0.5B – 1.7B) is already extremely fast ($\approx 90\text{ ms/token}$). The computational cost of drafting $k$ tokens ($\approx 25\text{ ms/token}$) plus parallel verification is comparable to evaluating tokens directly on the target.
 2. **Vocabulary Scaling:** With an enormous vocabulary ($151,936$ tokens), greedy top-1 argmax agreement between an 85M student and teacher on out-of-distribution prompts is naturally sparse without stochastic temperature sampling or soft top-$p$ scaling.
@@ -125,7 +125,7 @@ As noted in the project specification and the literature (Leviathan et al., 2023
 
 ---
 
-##  Quickstart
+## Quickstart
 
 ### 1. Installation
 ```bash
