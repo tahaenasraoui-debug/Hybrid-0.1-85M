@@ -1,7 +1,7 @@
 # Hybrid-0.1-85M: Lossless Speculative Decoding with Qwen
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2Bcu121-EE4C2C.svg?style=flat&logo=pytorch)](https://pytorch.org)
-[![HuggingFace](https://img.shields.io/badge/HuggingFace-Hybrid--0.1--85M-yellow.svg)](https://huggingface.co)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Tahary%2FHybrid--0.1--85M-yellow.svg)](https://huggingface.co/Tahary/Hybrid-0.1-85M)
 [![Target Family](https://img.shields.io/badge/Target_Family-Qwen2.5-blue.svg)](https://huggingface.co/Qwen)
 [![Verification](https://img.shields.io/badge/Equivalence_Tests-Passing-brightgreen.svg)](tests/test_equivalence.py)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)

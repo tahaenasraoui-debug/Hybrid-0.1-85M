@@ -167,7 +167,7 @@ checkpoint = torch.load("final_trained_draft_85m.pt", map_location="cuda")
 
 def main():
     parser = argparse.ArgumentParser(description="Upload 85M Draft Model to Hugging Face")
-    parser.add_argument("--repo-id", type=str, required=True, help="HF repo name, e.g., your_username/qwen2.5-85m-speculative-draft")
+    parser.add_argument("--repo-id", type=str, default="Tahary/Hybrid-0.1-85M", help="HF repo name (default: Tahary/Hybrid-0.1-85M)")
     parser.add_argument(
         "--checkpoint",
         type=str,
