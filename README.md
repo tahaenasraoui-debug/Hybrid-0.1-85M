@@ -1,11 +1,12 @@
-# Lossless Speculative Decoding with Custom 85M Draft Model & Qwen Target
+# Hybrid-0.1-85M: Lossless Speculative Decoding with Qwen
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2Bcu121-EE4C2C.svg?style=flat&logo=pytorch)](https://pytorch.org)
-[![HuggingFace](https://img.shields.io/badge/Target_Family-Qwen2.5%2F3-yellow.svg)](https://huggingface.co/Qwen)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Hybrid--0.1--85M-yellow.svg)](https://huggingface.co)
+[![Target Family](https://img.shields.io/badge/Target_Family-Qwen2.5-blue.svg)](https://huggingface.co/Qwen)
 [![Verification](https://img.shields.io/badge/Equivalence_Tests-Passing-brightgreen.svg)](tests/test_equivalence.py)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A production-grade, mathematically lossless **Speculative Decoding Engine** and custom **85M Causal Transformer** built from scratch in PyTorch — with **zero high-level `model.generate()` wrappers**.
+A production-grade, mathematically lossless **Speculative Decoding Engine** and custom **Hybrid-0.1-85M Causal Transformer** built from scratch in PyTorch — with **zero high-level `model.generate()` wrappers**.
 
 ---
 
