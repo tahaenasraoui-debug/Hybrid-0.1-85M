@@ -27,6 +27,12 @@ results/*.png
 *.txt
 !requirements.txt
 
+# C/C++ Build Artifacts
+build/
+*.o
+hybrid_infer
+csrc/hybrid_infer
+
 # Logs & Pytest
 *.log
 .pytest_cache/
