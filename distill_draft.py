@@ -14,7 +14,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from config import get_qwen_85m_config, TrainingConfig
 from model import SmallLLM
-from train import configure_optimizers, get_lr, get_compatible_device
+from train import configure_optimizers, get_lr
 
 
 class DistillationDataset(Dataset):

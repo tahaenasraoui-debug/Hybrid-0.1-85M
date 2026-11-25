@@ -10,7 +10,6 @@ Measures:
 import os
 import sys
 import time
-import gc
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -148,14 +147,15 @@ def benchmark_systems():
                 inp = torch.tensor([[tok]], dtype=torch.long, device=device)
                 with torch.no_grad():
                     _, _, c_cache = model(inp, kv_caches=c_cache, use_cache=True, start_pos=KVCacheManager.get_seq_len(c_cache))
-            
             c_tok = 198
             t0 = time.perf_counter()
             for _ in range(k):
                 inp = torch.tensor([[c_tok]], dtype=torch.long, device=device)
                 with torch.no_grad():
-                    l, _, c_cache = model(inp, kv_caches=c_cache, use_cache=True, start_pos=KVCacheManager.get_seq_len(c_cache))
-                    c_tok = int(torch.argmax(l[0, -1]).item())
+                    logits_step, _, c_cache = model(
+                        inp, kv_caches=c_cache, use_cache=True, start_pos=KVCacheManager.get_seq_len(c_cache)
+                    )
+                    c_tok = int(torch.argmax(logits_step[0, -1]).item())
             t1 = time.perf_counter()
             py_draft_times.append((t1 - t0) * 1000.0)
 

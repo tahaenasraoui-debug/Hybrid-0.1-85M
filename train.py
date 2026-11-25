@@ -14,14 +14,12 @@ Features:
 import math
 import os
 import time
-from typing import Optional
 import torch
 from torch.utils.data import DataLoader
 
-from config import ModelConfig, TrainingConfig, get_gtx1050_config, get_tiny_config, get_1b_config
-from dataset import SyntheticDataset, TextDataset
+from config import TrainingConfig, get_gtx1050_config
+from dataset import SyntheticDataset
 from model import SmallLLM
-from tokenizer import ByteTokenizer
 
 
 def configure_optimizers(model: SmallLLM, weight_decay: float, learning_rate: float, betas=(0.9, 0.95)):
@@ -33,7 +31,7 @@ def configure_optimizers(model: SmallLLM, weight_decay: float, learning_rate: fl
     decay_params = []
     nodecay_params = []
 
-    for name, param in model.named_parameters():
+    for _name, param in model.named_parameters():
         if not param.requires_grad:
             continue
         if param.dim() >= 2:
@@ -123,7 +121,7 @@ def train(
         optimizer.zero_grad(set_to_none=True)
         accum_loss = 0.0
 
-        for micro_step in range(train_cfg.gradient_accumulation_steps):
+        for _micro_step in range(train_cfg.gradient_accumulation_steps):
             try:
                 x, y = next(data_iter)
             except StopIteration:

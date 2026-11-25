@@ -5,7 +5,6 @@ and measures baseline token acceptance rate (tau).
 """
 
 import os
-import sys
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 

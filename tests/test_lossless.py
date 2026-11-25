@@ -5,12 +5,15 @@ Asserts 100% token-for-token parity with standard autoregressive generation at T
 
 import pytest
 import torch
-import torch.nn.functional as F
 
-from config import get_tiny_config, ModelConfig
+from config import ModelConfig
 from model import SmallLLM
 from tokenizer import ByteTokenizer
-from speculative import SpeculativeDecodingEngine, KVCacheManager
+from speculative import SpeculativeDecodingEngine
+
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:speculative.engine.SpeculativeDecodingEngine is deprecated:DeprecationWarning"
+)
 
 
 def autoregressive_target_generate(

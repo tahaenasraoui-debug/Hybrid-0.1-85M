@@ -2,14 +2,14 @@
 Demo: Train SmallLLM on a text file and generate before & after text.
 """
 
-import os
-import torch
-from config import get_gtx1050_config, get_tiny_config, TrainingConfig
+import argparse
+
+from config import TrainingConfig, get_gtx1050_config
 from dataset import TextDataset
 from generate import generate
 from model import SmallLLM
 from tokenizer import ByteTokenizer
-from train import train, get_compatible_device
+from train import get_compatible_device, train
 
 
 SAMPLE_TEXT = """
@@ -28,10 +28,21 @@ From that magical night onward, Lily returned every week, learning the secrets o
 
 
 def main():
-    data_path = "/home/tahary/.gemini/antigravity/scratch/small_llm/sample_data.txt"
+    parser = argparse.ArgumentParser(description="Demo: Train SmallLLM on a text file.")
+    parser.add_argument(
+        "--data",
+        type=str,
+        default="sample_data.txt",
+        help="Path to training text file (created with sample text if absent)",
+    )
+    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_demo", help="Checkpoint output directory")
+    parser.add_argument("--max_steps", type=int, default=80, help="Training steps")
+    args = parser.parse_args()
+
+    data_path = args.data
     with open(data_path, "w", encoding="utf-8") as f:
         f.write(SAMPLE_TEXT)
-    print(f"Created sample training data ({len(SAMPLE_TEXT):,} characters).")
+    print(f"Created sample training data at {data_path} ({len(SAMPLE_TEXT):,} characters).")
 
     # 1. Initialize Model & Tokenizer
     cfg = get_gtx1050_config()
@@ -57,11 +68,11 @@ def main():
         gradient_accumulation_steps=1,
         learning_rate=1e-3,
         warmup_steps=10,
-        max_steps=80,
+        max_steps=args.max_steps,
         device=device,
         precision="float32",
     )
-    train(model, dataset, train_cfg, checkpoint_dir="./checkpoints_demo")
+    train(model, dataset, train_cfg, checkpoint_dir=args.checkpoint_dir)
 
     # 4. Test generation AFTER training
     print("\n" + "=" * 50)

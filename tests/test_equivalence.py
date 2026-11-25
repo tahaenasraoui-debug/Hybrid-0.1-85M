@@ -11,7 +11,6 @@ Tests:
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 from config import ModelConfig
 from model import SmallLLM

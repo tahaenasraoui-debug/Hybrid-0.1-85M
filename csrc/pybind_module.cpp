@@ -33,6 +33,9 @@ public:
     }
 
     torch::Tensor get_logits() {
+        if (!engine->loaded) {
+            throw std::runtime_error("Model not loaded");
+        }
         int vocab_size = engine->header.vocab_size;
         auto options = torch::TensorOptions().dtype(torch::kFloat32);
         torch::Tensor t = torch::empty({vocab_size}, options);

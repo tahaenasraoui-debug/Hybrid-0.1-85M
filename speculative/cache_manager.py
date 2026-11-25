@@ -4,8 +4,7 @@ Handles robust sequence length retrieval, truncation, and synchronization
 across Hugging Face DynamicCache and native PyTorch KV-cache structures.
 """
 
-from typing import Any, List, Optional, Tuple, Union
-import torch
+from typing import Any
 
 
 class KVCacheManager:

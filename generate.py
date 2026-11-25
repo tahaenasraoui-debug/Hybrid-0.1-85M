@@ -106,7 +106,7 @@ def generate(
         print(tokenizer.decode([next_tok]), end="", flush=True)
 
     # Step 2: Incremental decoding phase with KV-cache (process only 1 token per step)
-    for step in range(max_new_tokens - 1):
+    for _step in range(max_new_tokens - 1):
         if next_tok == tokenizer.eos_id:
             break
 

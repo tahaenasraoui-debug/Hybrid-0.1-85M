@@ -10,7 +10,6 @@ Usage:
 
 import argparse
 import os
-import sys
 import time
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
@@ -32,10 +31,10 @@ def main():
     args = parser.parse_args()
 
     device = str(get_compatible_device())
-    print(f"============================================================")
+    print("============================================================")
     print(f"  Speculative Decoding Engine: 85M Draft Model + {args.target}")
     print(f"  Device: {device} | Draft Window K = {args.k}")
-    print(f"============================================================")
+    print("============================================================")
 
     # 1. Load Tokenizer
     print(f"\n[1/3] Loading Tokenizer ({args.target})...")
@@ -66,7 +65,7 @@ def main():
     target_model.eval()
 
     # 3. Load Draft Model (85M)
-    print(f"[3/3] Loading 85M Draft Model...")
+    print("[3/3] Loading 85M Draft Model...")
     draft_cfg = get_qwen_85m_config()
     draft_model = SmallLLM(draft_cfg).to(device)
 
@@ -116,7 +115,7 @@ def main():
         print("Response:")
         print(result["text"])
         print("-" * 60)
-        print(f"Speculative Decoding Stats:")
+        print("Speculative Decoding Stats:")
         print(f" • Tokens Generated:     {tokens_generated} tokens")
         print(f" • Total Time:           {total_time:.2f}s ({tok_per_sec:.1f} tok/s)")
         print(f" • Verification Passes:  {result['target_forward_passes']}")

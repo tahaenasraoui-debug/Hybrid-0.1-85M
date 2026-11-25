@@ -16,7 +16,7 @@ import argparse
 import os
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -96,11 +96,13 @@ def run_speculative_benchmarks(
     draft_model,
     tokenizer,
     prompts: List[str],
-    k_values: List[int] = [2, 3, 4, 5, 6],
+    k_values: Optional[List[int]] = None,
     max_new_tokens: int = 64,
     device: str = "cuda",
 ) -> List[Dict[str, Any]]:
     """Runs speculative decoding benchmarks across draft lookahead k values."""
+    if k_values is None:
+        k_values = [2, 3, 4, 5, 6]
     engine = SpeculativeEngine(
         target_model=target_model,
         draft_model=draft_model,
@@ -173,10 +175,10 @@ def main():
     args = parser.parse_args()
 
     device = args.device or str(get_compatible_device())
-    print(f"============================================================")
-    print(f"  Speculative Decoding Empirical Benchmarks")
+    print("============================================================")
+    print("  Speculative Decoding Empirical Benchmarks")
     print(f"  Target: {args.target} | Device: {device}")
-    print(f"============================================================")
+    print("============================================================")
 
     # 1. Load Tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.target, trust_remote_code=True, local_files_only=True)

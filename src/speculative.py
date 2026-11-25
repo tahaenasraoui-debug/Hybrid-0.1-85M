@@ -11,12 +11,69 @@ Requirements Satisfied:
 4. Mathematically Lossless Rejection Sampling: Exact equivalence to target distribution.
 """
 
+import copy
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
+
 import torch
 import torch.nn.functional as F
 
 from speculative.cache_manager import KVCacheManager
+
+
+def _is_quantized_or_dispatched(model: Any) -> bool:
+    """Return True if a model is quantized (4-bit/8-bit) or dispatched via Accelerate."""
+    if getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False):
+        return True
+    if getattr(model, "is_quantized", False):
+        return True
+    if getattr(model, "hf_device_map", None) is not None:
+        return True
+    if getattr(model, "quantization_method", None) is not None:
+        return True
+    return False
+
+
+def _get_model_device(model: Any, fallback: Optional[torch.device] = None) -> torch.device:
+    """Infer the input device for a PyTorch / HuggingFace model."""
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        dev = getattr(model, "device", None)
+        if dev is not None:
+            return torch.device(dev)
+        return fallback if fallback is not None else torch.device("cpu")
+
+
+def apply_top_p_filtering(probs: torch.Tensor, top_p: float) -> torch.Tensor:
+    """
+    Apply nucleus (top-p) filtering along the last dimension of a probability tensor
+    and renormalize so remaining probabilities sum to 1.
+    Works for both 1D (vocab_size,) and ND (..., vocab_size) tensors.
+    """
+    if top_p >= 1.0:
+        return probs
+    if top_p <= 0.0:
+        top_idx = torch.argmax(probs, dim=-1, keepdim=True)
+        filtered = torch.zeros_like(probs)
+        filtered.scatter_(-1, top_idx, 1.0)
+        return filtered
+
+    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+    cum_probs = torch.cumsum(sorted_probs, dim=-1)
+    mask = cum_probs > top_p
+    mask[..., 1:] = mask[..., :-1].clone()
+    mask[..., 0] = False
+    sorted_probs = sorted_probs.masked_fill(mask, 0.0)
+    filtered = torch.zeros_like(probs).scatter_(-1, sorted_indices, sorted_probs)
+    denom = filtered.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+    return filtered / denom
+
+
+def logits_to_probs(logits: torch.Tensor, temperature: float, top_p: float = 1.0) -> torch.Tensor:
+    """Convert raw logits into a float32 temperature-scaled, top-p filtered probability distribution."""
+    probs = F.softmax(logits.float() / temperature, dim=-1)
+    return apply_top_p_filtering(probs, top_p)
 
 
 class SpeculativeEngine:
@@ -34,20 +91,38 @@ class SpeculativeEngine:
     ):
         if device is not None:
             dev = torch.device(device)
-            self.target_model = target_model.to(dev)
-            self.draft_model = draft_model.to(dev)
-            self.target_device = dev
-            self.draft_device = dev
-            self.device = dev
+            if _is_quantized_or_dispatched(target_model):
+                self.target_model = target_model
+                self.target_device = _get_model_device(target_model, fallback=dev)
+            else:
+                self.target_model = target_model.to(dev)
+                self.target_device = dev
+
+            if _is_quantized_or_dispatched(draft_model):
+                self.draft_model = draft_model
+                self.draft_device = _get_model_device(draft_model, fallback=dev)
+            else:
+                self.draft_model = draft_model.to(dev)
+                self.draft_device = dev
+
+            self.device = self.draft_device
         else:
             self.target_model = target_model
             self.draft_model = draft_model
-            self.target_device = next(target_model.parameters()).device
-            self.draft_device = next(draft_model.parameters()).device
+            self.target_device = _get_model_device(target_model)
+            self.draft_device = _get_model_device(draft_model)
             self.device = self.draft_device
 
         self.tokenizer = tokenizer
-        self.max_seq_len = min(max_seq_len, 2048)
+        seq_limits = [max_seq_len, 2048]
+        for model in (self.target_model, self.draft_model):
+            cfg = getattr(model, "config", None)
+            if cfg is not None:
+                for attr in ("max_seq_len", "max_position_embeddings"):
+                    limit = getattr(cfg, attr, None)
+                    if isinstance(limit, int) and limit > 0:
+                        seq_limits.append(limit)
+        self.max_seq_len = min(seq_limits)
 
         self.target_model.eval()
         self.draft_model.eval()
@@ -61,7 +136,7 @@ class SpeculativeEngine:
         self, model: Any, input_ids: torch.Tensor, cache: Any
     ) -> Tuple[torch.Tensor, Any]:
         """Unified forward pass handler for SmallLLM and HuggingFace models."""
-        model_device = next(model.parameters()).device
+        model_device = _get_model_device(model, fallback=self.device)
         if input_ids.device != model_device:
             input_ids = input_ids.to(model_device)
 
@@ -108,14 +183,15 @@ class SpeculativeEngine:
         else:
             prompt_ids = list(prompt)
 
-        prompt_len = len(prompt_ids)
+        if not prompt_ids:
+            raise ValueError("Prompt must contain at least one token.")
+
         input_tensor = torch.tensor([prompt_ids], dtype=torch.long, device=self.device)
 
         # 2. Prefill Phase (Single forward pass on prompt for both models)
         target_logits, target_cache = self._forward(self.target_model, input_tensor, None)
         if self.draft_model is self.target_model:
             draft_logits = target_logits
-            import copy
             draft_cache = copy.deepcopy(target_cache)
         else:
             draft_logits, draft_cache = self._forward(self.draft_model, input_tensor, None)
@@ -131,10 +207,11 @@ class SpeculativeEngine:
 
         while len(generated_ids) < max_new_tokens:
             base_len = KVCacheManager.get_seq_len(target_cache)
-            if base_len >= self.max_seq_len:
+            remaining_seq = self.max_seq_len - base_len
+            if remaining_seq <= 0:
                 break
 
-            actual_k = min(k, max_new_tokens - len(generated_ids))
+            actual_k = min(k, max_new_tokens - len(generated_ids), remaining_seq)
             if actual_k <= 0:
                 break
 
@@ -149,19 +226,10 @@ class SpeculativeEngine:
 
             for step_idx in range(actual_k):
                 if temperature > 0.0:
-                    step_probs = F.softmax(step_draft_logits / temperature, dim=-1)
-                    if top_p < 1.0:
-                        sorted_probs, sorted_indices = torch.sort(step_probs, descending=True)
-                        cum_probs = torch.cumsum(sorted_probs, dim=-1)
-                        mask = cum_probs > top_p
-                        mask[..., 1:] = mask[..., :-1].clone()
-                        mask[..., 0] = False
-                        sorted_probs[mask] = 0.0
-                        step_probs = torch.zeros_like(step_probs).scatter_(-1, sorted_indices, sorted_probs)
-                        step_probs = step_probs / step_probs.sum(dim=-1, keepdim=True)
+                    step_probs = logits_to_probs(step_draft_logits, temperature=temperature, top_p=top_p)
                     d_tok = int(torch.multinomial(step_probs, num_samples=1).item())
                 else:
-                    step_probs = F.softmax(step_draft_logits, dim=-1)
+                    step_probs = F.softmax(step_draft_logits.float(), dim=-1)
                     d_tok = int(torch.argmax(step_draft_logits).item())
 
                 # Confidence gating: stop drafting early if confidence drops below threshold
@@ -184,8 +252,8 @@ class SpeculativeEngine:
             actual_draft_len = len(draft_tokens)
             if actual_draft_len == 0:
                 # Fallback to standard target step
-                if temperature > 0:
-                    target_p = F.softmax(curr_target_logits / temperature, dim=-1)
+                if temperature > 0.0:
+                    target_p = logits_to_probs(curr_target_logits, temperature=temperature, top_p=top_p)
                     next_tok = int(torch.multinomial(target_p, num_samples=1).item())
                 else:
                     next_tok = int(torch.argmax(curr_target_logits).item())
@@ -216,8 +284,8 @@ class SpeculativeEngine:
                 [curr_target_logits.unsqueeze(0), target_out_logits[0, :, :]], dim=0
             )
 
-            if temperature > 0:
-                all_target_probs = F.softmax(all_target_logits / temperature, dim=-1)
+            if temperature > 0.0:
+                all_target_probs = logits_to_probs(all_target_logits, temperature=temperature, top_p=top_p)
             else:
                 all_target_probs = all_target_logits
             all_target_probs = all_target_probs.to(self.draft_device)
@@ -227,7 +295,6 @@ class SpeculativeEngine:
             # -----------------------------------------------------------------
             accepted_in_round: List[int] = []
             rejection_occurred = False
-            rejection_idx = None
             replacement_token = None
 
             if temperature <= 0.0:
@@ -238,7 +305,6 @@ class SpeculativeEngine:
                         accepted_in_round.append(draft_tokens[i])
                     else:
                         rejection_occurred = True
-                        rejection_idx = i
                         replacement_token = target_greedy_tok
                         break
 
@@ -259,11 +325,10 @@ class SpeculativeEngine:
                     alpha = min(1.0, p_val / max(q_val, 1e-12))
                     r = torch.rand(1).item()
 
-                    if r <= alpha:
+                    if r < alpha:
                         accepted_in_round.append(tok)
                     else:
                         rejection_occurred = True
-                        rejection_idx = i
                         # Resample from normalized positive residual: max(0, p(x) - q(x))
                         residual = torch.clamp(all_target_probs[i] - draft_probs_tensor[i], min=0.0)
                         res_sum = residual.sum().item()
@@ -301,6 +366,9 @@ class SpeculativeEngine:
             # -----------------------------------------------------------------
             # Rollback caches to prefix_len + num_accepted_draft
             valid_prefix_len = base_len + num_accepted_draft
+            if valid_prefix_len >= self.max_seq_len:
+                break
+
             target_cache = KVCacheManager.truncate_cache(target_cache, valid_prefix_len)
             draft_cache = KVCacheManager.truncate_cache(draft_cache, valid_prefix_len)
 
@@ -311,7 +379,6 @@ class SpeculativeEngine:
             target_out_final, target_cache = self._forward(self.target_model, final_tensor, target_cache)
             if self.draft_model is self.target_model:
                 draft_out_final = target_out_final
-                import copy
                 draft_cache = copy.deepcopy(target_cache)
             else:
                 draft_out_final, draft_cache = self._forward(self.draft_model, final_tensor, draft_cache)
@@ -362,6 +429,7 @@ def speculative_generate(
     top_p: float = 1.0,
     confidence_threshold: Optional[float] = None,
     device: Optional[Union[str, torch.device]] = None,
+    max_seq_len: int = 2048,
 ) -> Dict[str, Any]:
     """
     Functional entry point for speculative decoding matching project spec.
@@ -371,6 +439,7 @@ def speculative_generate(
         draft_model=draft_model,
         tokenizer=tokenizer,
         device=device,
+        max_seq_len=max_seq_len,
     )
     return engine.generate(
         prompt=prompt,

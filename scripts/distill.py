@@ -14,7 +14,6 @@ import argparse
 import json
 import os
 import sys
-import time
 
 # Ensure project root is in sys.path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -22,12 +21,11 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
-from config import get_qwen_85m_config, TrainingConfig
+from config import get_qwen_85m_config
 from model import SmallLLM
 from train import get_compatible_device
 
@@ -43,6 +41,8 @@ class InstructionDataset(Dataset):
 
         # Load Dolly-15k
         dolly_path = "dolly_15k.jsonl"
+        if not os.path.exists(dolly_path):
+            dolly_path = os.path.join(PROJECT_ROOT, "dolly_15k.jsonl")
         if os.path.exists(dolly_path):
             with open(dolly_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -59,6 +59,8 @@ class InstructionDataset(Dataset):
 
         # Load Alpaca-52k
         alpaca_path = "alpaca_52k.json"
+        if not os.path.exists(alpaca_path):
+            alpaca_path = os.path.join(PROJECT_ROOT, "alpaca_52k.json")
         if os.path.exists(alpaca_path):
             with open(alpaca_path, "r", encoding="utf-8") as f:
                 alpaca_data = json.load(f)
@@ -114,27 +116,38 @@ def compute_distillation_loss(
     temperature: float = 1.5,
     top_k: int = 64,
 ) -> torch.Tensor:
-    """Computes Forward KL, Reverse KL, or Cross Entropy loss."""
-    top_target, top_idx = torch.topk(target_logits, k=top_k, dim=-1)
-    gathered_draft = torch.gather(draft_logits, -1, top_idx)
+    """Computes Forward KL, Reverse KL, or SFT (top-1 teacher Cross-Entropy) loss."""
+    k = min(top_k, target_logits.size(-1))
+    top_target, top_idx = torch.topk(target_logits, k=k, dim=-1)
+
+    if loss_type == "sft":
+        # Cross Entropy over top target token
+        targets = top_idx[..., 0]
+        return F.cross_entropy(
+            draft_logits.float().reshape(-1, draft_logits.size(-1)),
+            targets.reshape(-1),
+        )
+
+    gathered_draft = torch.gather(draft_logits, -1, top_idx).float()
+    top_target = top_target.float()
 
     p_target = F.softmax(top_target / temperature, dim=-1)
     log_p_target = F.log_softmax(top_target / temperature, dim=-1)
     log_q_draft = F.log_softmax(gathered_draft / temperature, dim=-1)
-    q_draft = F.softmax(gathered_draft / temperature, dim=-1)
 
     if loss_type == "forward_kl":
         # Mode-covering: E_p [ log p - log q ]
         kl = (p_target * (log_p_target - log_q_draft)).sum(dim=-1).mean()
-        return (temperature ** 2) * kl
+        return (temperature**2) * kl
     elif loss_type == "reverse_kl":
         # Mode-seeking: E_q [ log q - log p ]
+        q_draft = F.softmax(gathered_draft / temperature, dim=-1)
         kl = (q_draft * (log_q_draft - log_p_target)).sum(dim=-1).mean()
-        return (temperature ** 2) * kl
+        return (temperature**2) * kl
     else:
-        # Cross Entropy over top target token
-        targets = top_idx[:, :, 0]
-        return F.cross_entropy(draft_logits.view(-1, draft_logits.size(-1)), targets.view(-1))
+        raise ValueError(
+            f"Unsupported loss_type '{loss_type}'. Expected one of: 'forward_kl', 'reverse_kl', 'sft'."
+        )
 
 
 def distill(
@@ -203,24 +216,23 @@ def distill(
         with torch.no_grad():
             t_out = teacher(tokens)
             target_logits = t_out.logits
-            top_target, top_idx = torch.topk(target_logits, k=64, dim=-1)
             del t_out
-            if device == "cuda":
-                torch.cuda.empty_cache()
 
         draft_logits, _, _ = draft(tokens)
-        gathered_draft = torch.gather(draft_logits, -1, top_idx)
-        del draft_logits
+        loss = compute_distillation_loss(
+            draft_logits,
+            target_logits,
+            loss_type=loss_type,
+            temperature=1.5,
+            top_k=64,
+        )
+        del draft_logits, target_logits
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
-        temp = 1.5
-        p_target = F.softmax(top_target / temp, dim=-1)
-        log_p_target = F.log_softmax(top_target / temp, dim=-1)
-        log_q_draft = F.log_softmax(gathered_draft / temp, dim=-1)
-
-        loss = ((temp ** 2) * (p_target * (log_p_target - log_q_draft)).sum(dim=-1)).mean()
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        optimizer.zero_grad()
 
         if step % 50 == 0:
             print(f"Step {step:05d}/{max_steps} | Loss: {loss.item():.4f}")

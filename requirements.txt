@@ -3,6 +3,10 @@ transformers>=4.40.0,<5.0.0
 accelerate
 bitsandbytes>=0.45.0
 huggingface_hub
+matplotlib
+numpy
+pybind11
+setuptools
 pytest
 tqdm
 safetensors

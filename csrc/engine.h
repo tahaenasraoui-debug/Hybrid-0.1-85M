@@ -1,13 +1,41 @@
 #pragma once
 
-#include <vector>
-#include <string>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <string>
+#include <vector>
+
+#if defined(__AVX2__) && defined(__FMA__)
 #include <immintrin.h>
+#endif
+
+#ifdef _OPENMP
 #include <omp.h>
-#include <algorithm>
+#define HYBRID_OMP_PRAGMA(x) _Pragma(#x)
+#else
+#define HYBRID_OMP_PRAGMA(x)
+inline int omp_get_max_threads() { return 1; }
+#endif
+
+inline float* alloc_aligned_floats(size_t num_floats) {
+    if (num_floats > (std::numeric_limits<size_t>::max() - 63) / sizeof(float)) {
+        return nullptr;
+    }
+    size_t raw_bytes = num_floats * sizeof(float);
+    if (raw_bytes == 0) {
+        raw_bytes = 64;
+    }
+    size_t aligned_bytes = ((raw_bytes + 63) / 64) * 64;
+    void* ptr = std::aligned_alloc(64, aligned_bytes);
+    if (ptr) {
+        std::memset(ptr, 0, aligned_bytes);
+    }
+    return static_cast<float*>(ptr);
+}
 
 struct ModelHeader {
     uint32_t magic;          // 0x31425948 ('HYB1')
@@ -21,48 +49,50 @@ struct ModelHeader {
     float rope_theta;        // 1000000.0f
     float norm_eps;          // 1e-6f
     uint32_t max_seq_len;    // 2048
-    uint32_t tie_embeddings; // 1
+    uint32_t tie_embeddings; // 1 = tied, 0 = untied (lm_head follows final_norm)
 };
 
 struct LayerWeights {
-    float* attn_norm; // [d_model]
-    float* q_proj;    // [n_heads * head_dim, d_model] = [480, 480]
-    float* k_proj;    // [n_kv_heads * head_dim, d_model] = [120, 480]
-    float* v_proj;    // [n_kv_heads * head_dim, d_model] = [120, 480]
-    float* o_proj;    // [d_model, n_heads * head_dim] = [480, 480]
-    float* ffn_norm;  // [d_model]
-    float* w1;        // [hidden_dim, d_model] = [1280, 480] (gate)
-    float* w2;        // [d_model, hidden_dim] = [480, 1280] (down)
-    float* w3;        // [hidden_dim, d_model] = [1280, 480] (up)
+    float* attn_norm = nullptr; // [d_model]
+    float* q_proj = nullptr;    // [n_heads * head_dim, d_model] = [480, 480]
+    float* k_proj = nullptr;    // [n_kv_heads * head_dim, d_model] = [120, 480]
+    float* v_proj = nullptr;    // [n_kv_heads * head_dim, d_model] = [120, 480]
+    float* o_proj = nullptr;    // [d_model, n_heads * head_dim] = [480, 480]
+    float* ffn_norm = nullptr;  // [d_model]
+    float* w1 = nullptr;        // [hidden_dim, d_model] = [1280, 480] (gate)
+    float* w2 = nullptr;        // [d_model, hidden_dim] = [480, 1280] (down)
+    float* w3 = nullptr;        // [hidden_dim, d_model] = [1280, 480] (up)
 };
 
 // Zero-allocation, contiguous linear KV Cache for fast rollback
 struct KVCache {
-    int max_seq_len;
-    int n_layers;
-    int n_kv_heads;
-    int head_dim;
-    int seq_len; // Current sequence length
+    int max_seq_len = 0;
+    int n_layers = 0;
+    int n_kv_heads = 0;
+    int head_dim = 0;
+    int seq_len = 0; // Current sequence length
 
     // Flat memory layout: [n_layers, 2 (k,v), max_seq_len, n_kv_heads, head_dim]
-    float* data;
+    float* data = nullptr;
 
-    void init(int layers, int kv_heads, int h_dim, int max_len) {
+    bool init(int layers, int kv_heads, int h_dim, int max_len) {
+        free_mem();
         n_layers = layers;
         n_kv_heads = kv_heads;
         head_dim = h_dim;
         max_seq_len = max_len;
         seq_len = 0;
         size_t total_floats = (size_t)n_layers * 2 * max_seq_len * n_kv_heads * head_dim;
-        data = (float*)aligned_alloc(64, total_floats * sizeof(float));
-        std::memset(data, 0, total_floats * sizeof(float));
+        data = alloc_aligned_floats(total_floats);
+        return data != nullptr;
     }
 
     void free_mem() {
         if (data) {
-            free(data);
+            std::free(data);
             data = nullptr;
         }
+        seq_len = 0;
     }
 
     inline float* get_k_ptr(int layer, int pos) {
@@ -89,6 +119,7 @@ public:
     ModelHeader header;
     std::vector<LayerWeights> layers;
     float* tok_embeddings; // [vocab_size, d_model]
+    float* lm_head;        // [vocab_size, d_model] when tie_embeddings == 0
     float* final_norm;     // [d_model]
 
     // Precomputed RoPE tables: [max_seq_len, head_dim]
@@ -117,6 +148,7 @@ public:
     HybridInferenceEngine();
     ~HybridInferenceEngine();
 
+    void free_buffers();
     bool load_from_binary(const std::string& bin_path);
     void reset_cache();
     void rollback_cache(int target_len);
@@ -134,6 +166,7 @@ public:
 
     // Fast vector math helpers
     static inline float vec_dot(const float* a, const float* b, int n) {
+#if defined(__AVX2__) && defined(__FMA__)
         __m256 sum256 = _mm256_setzero_ps();
         int i = 0;
         for (; i <= n - 8; i += 8) {
@@ -148,16 +181,24 @@ public:
             sum += a[i] * b[i];
         }
         return sum;
+#else
+        float sum = 0.0f;
+        for (int i = 0; i < n; ++i) {
+            sum += a[i] * b[i];
+        }
+        return sum;
+#endif
     }
 
     static inline void gemv(float* y, const float* W, const float* x, int out_dim, int in_dim) {
-        #pragma omp parallel for schedule(static)
+        HYBRID_OMP_PRAGMA(omp parallel for schedule(static))
         for (int i = 0; i < out_dim; ++i) {
             y[i] = vec_dot(W + (size_t)i * in_dim, x, in_dim);
         }
     }
 
     static inline void rmsnorm(float* out, const float* x, const float* weight, int dim, float eps) {
+#if defined(__AVX2__) && defined(__FMA__)
         __m256 sum256 = _mm256_setzero_ps();
         int i = 0;
         for (; i <= dim - 8; i += 8) {
@@ -182,6 +223,16 @@ public:
         for (; i < dim; ++i) {
             out[i] = x[i] * scale * weight[i];
         }
+#else
+        float sum_sq = 0.0f;
+        for (int i = 0; i < dim; ++i) {
+            sum_sq += x[i] * x[i];
+        }
+        float scale = 1.0f / std::sqrt((sum_sq / (float)dim) + eps);
+        for (int i = 0; i < dim; ++i) {
+            out[i] = x[i] * scale * weight[i];
+        }
+#endif
     }
 
     static inline float silu(float x) {

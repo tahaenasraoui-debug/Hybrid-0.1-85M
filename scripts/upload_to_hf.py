@@ -52,11 +52,11 @@ def upload(repo_id: str, checkpoint_path: str):
         json.dump(config_dict, f, indent=2)
 
     # 2. Generate Model Card README.md for Hugging Face
-    hf_readme = f"""---
+    hf_readme = """---
 language:
 - en
 - zh
-license: apache-2.0
+license: mit
 tags:
 - speculative-decoding
 - draft-model
@@ -78,7 +78,7 @@ When paired in a heterogeneous speculative decoding setup (running Hybrid-0.1-85
 - **Model Name:** Hybrid-0.1-85M
 - **Parameters:** ~85,000,000 (85M)
 - **Transformer Layers:** 5
-- **Hidden Dimension ($d_{{\\text{{model}}}}$):** 480
+- **Hidden Dimension ($d_{\\text{model}}$):** 480
 - **Attention Heads:** 8 Query heads, 2 Key-Value heads (Grouped Query Attention)
 - **Activations:** SwiGLU (hidden_dim = 1280)
 - **Positional Encoding:** RoPE (Rotary Position Embeddings, theta = 1,000,000)

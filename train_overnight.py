@@ -10,27 +10,27 @@ Key Features:
 - Live Logging: Writes detailed progress, tokens/sec, and ETA to train_overnight.log.
 """
 
+import argparse
 import os
+
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import json
-import signal
-import sys
 import time
-from typing import List
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
 try:
     import bitsandbytes as bnb
     HAS_BNB = True
 except ImportError:
     HAS_BNB = False
 
-from config import get_qwen_85m_config, TrainingConfig
+from config import TrainingConfig, get_qwen_85m_config
 from model import SmallLLM
-from train import configure_optimizers, get_lr, get_compatible_device
+from train import configure_optimizers, get_compatible_device, get_lr
 
 
 # Configure thermal management: use 4 threads to prevent laptop overheating
@@ -39,7 +39,14 @@ torch.set_num_threads(4)
 
 class InstructionDataset(Dataset):
     """Loads Alpaca and Dolly datasets lazily for instant startup."""
-    def __init__(self, tokenizer: AutoTokenizer, max_seq_len: int = 256):
+
+    def __init__(
+        self,
+        tokenizer: AutoTokenizer,
+        max_seq_len: int = 256,
+        dolly_path: str = "dolly_15k.jsonl",
+        alpaca_path: str = "alpaca_52k.json",
+    ):
         self.raw_conversations = []
         self.tokenizer = tokenizer
         self.max_seq_len = max_seq_len
@@ -47,8 +54,7 @@ class InstructionDataset(Dataset):
         print("Loading datasets for overnight training...")
 
         # 1. Load Dolly-15k
-        dolly_path = "/home/tahary/.gemini/antigravity/scratch/small_llm/dolly_15k.jsonl"
-        if os.path.exists(dolly_path):
+        if dolly_path and os.path.exists(dolly_path):
             count = 0
             with open(dolly_path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -66,8 +72,7 @@ class InstructionDataset(Dataset):
             print(f"Loaded {count:,} samples from Dolly-15k.")
 
         # 2. Load Alpaca-52k
-        alpaca_path = "/home/tahary/.gemini/antigravity/scratch/small_llm/alpaca_52k.json"
-        if os.path.exists(alpaca_path):
+        if alpaca_path and os.path.exists(alpaca_path):
             with open(alpaca_path, "r", encoding="utf-8") as f:
                 alpaca_data = json.load(f)
             count = 0
@@ -124,6 +129,8 @@ def train_overnight(
     target_name: str = "Qwen/Qwen2.5-0.5B-Instruct",
     checkpoint_dir: str = "./checkpoints_overnight",
     log_file: str = "train_overnight.log",
+    dolly_path: str = "dolly_15k.jsonl",
+    alpaca_path: str = "alpaca_52k.json",
     batch_size: int = 1,
     gradient_accumulation_steps: int = 4,
     learning_rate: float = 3e-4,
@@ -190,7 +197,12 @@ def train_overnight(
         optimizer = configure_optimizers(draft_model, weight_decay=0.01, learning_rate=learning_rate)
 
     # 3. Setup Dataset & Dataloader
-    dataset = InstructionDataset(tokenizer, max_seq_len=256)
+    dataset = InstructionDataset(
+        tokenizer,
+        max_seq_len=256,
+        dolly_path=dolly_path,
+        alpaca_path=alpaca_path,
+    )
     pad_id = getattr(tokenizer, "pad_token_id", 151643) or 151643
     loader = DataLoader(
         dataset,
@@ -318,4 +330,30 @@ def train_overnight(
 
 
 if __name__ == "__main__":
-    train_overnight()
+    parser = argparse.ArgumentParser(description="Overnight Distillation Training for 85M Qwen Draft Model")
+    parser.add_argument("--target", type=str, default="Qwen/Qwen2.5-0.5B-Instruct", help="Target teacher model")
+    parser.add_argument("--checkpoint_dir", type=str, default="./checkpoints_overnight", help="Checkpoint directory")
+    parser.add_argument("--log_file", type=str, default="train_overnight.log", help="Log output file path")
+    parser.add_argument("--dolly_path", type=str, default="dolly_15k.jsonl", help="Path to Dolly JSONL dataset")
+    parser.add_argument("--alpaca_path", type=str, default="alpaca_52k.json", help="Path to Alpaca JSON dataset")
+    parser.add_argument("--batch_size", type=int, default=1, help="Micro-batch size")
+    parser.add_argument("--grad_accum", type=int, default=4, help="Gradient accumulation steps")
+    parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate")
+    parser.add_argument("--max_hours", type=float, default=8.5, help="Max wall-clock training hours")
+    parser.add_argument("--max_steps", type=int, default=35000, help="Max optimizer steps")
+    parser.add_argument("--save_every", type=int, default=500, help="Checkpoint save interval in steps")
+    args = parser.parse_args()
+
+    train_overnight(
+        target_name=args.target,
+        checkpoint_dir=args.checkpoint_dir,
+        log_file=args.log_file,
+        dolly_path=args.dolly_path,
+        alpaca_path=args.alpaca_path,
+        batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        learning_rate=args.lr,
+        max_hours=args.max_hours,
+        max_steps=args.max_steps,
+        save_every=args.save_every,
+    )

@@ -3,7 +3,7 @@
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.5%2Bcu121-EE4C2C.svg?style=flat&logo=pytorch)](https://pytorch.org)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Tahary%2FHybrid--0.1--85M-yellow.svg)](https://huggingface.co/Tahary/Hybrid-0.1-85M)
 [![Target Family](https://img.shields.io/badge/Target_Family-Qwen2.5-blue.svg)](https://huggingface.co/Qwen)
-[![Verification](https://img.shields.io/badge/Equivalence_Tests-Passing-brightgreen.svg)](tests/test_equivalence.py)
+[![CI](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M/actions/workflows/ci.yml/badge.svg)](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A production-grade, mathematically lossless **Speculative Decoding Engine** and custom **Hybrid-0.1-85M Causal Transformer** built from scratch in PyTorch — with **zero high-level `model.generate()` wrappers**.
@@ -18,12 +18,12 @@ A production-grade, mathematically lossless **Speculative Decoding Engine** and 
 
 ### Scope Honesty
 * **Target Model (`Qwen/Qwen3-1.7B` / `Qwen2.5`):** Pretrained weights sourced from the official Qwen family (28 layers, 16 Q / 8 KV GQA heads, 32K context). Loaded in 4-bit NF4 (`BitsAndBytesConfig`) to guarantee total resident GPU memory remains strictly under **2.8 GB** on a 3 GB VRAM consumer card (NVIDIA GTX 1050 Mobile).
-* **Draft Model (Custom 85M Causal LM):** Architected and trained **from scratch**. Incorporates Rotary Position Embeddings (RoPE, $\theta = 10^6$), SwiGLU non-linear activations, RMSNorm, Grouped-Query Attention (GQA), and native KV-caching.
-* **Tokenizer Alignment:** Both models share Qwen's exact tokenizer (`vocab_size = 151,669` / `151,936`) and special tokens (`<|im_start|>`, `<|im_end|>`).
-* **Parameter Budget:** Uses `tie_word_embeddings=True` on the 85M draft model:
-  $$\text{Embedding Parameters: } 151,669 \times 384 \approx 58.2\text{M}$$
-  $$\text{Transformer Layer Parameters: } 15 \times 1.77\text{M} \approx 26.8\text{M}$$
-  $$\text{Total Parameters: } 58.2\text{M} + 26.8\text{M} \approx \mathbf{85.0\text{M Total}}$$
+* **Draft Model (Custom 85M Causal LM, `get_qwen_85m_config()` in [`config.py`](config.py)):** Architected and trained **from scratch**. Incorporates Rotary Position Embeddings (RoPE, `rope_theta = 1,000,000`), SwiGLU non-linear activations (`hidden_dim = 1,280`), RMSNorm (`norm_eps = 1e-6`), Grouped-Query Attention (`n_heads = 8`, `n_kv_heads = 2`, `head_dim = 60`), `n_layers = 5`, `d_model = 480`, `max_seq_len = 2,048`, and native KV-caching.
+* **Tokenizer Alignment:** Both models share Qwen's exact tokenizer (`vocab_size = 151,936`) and special tokens (`<|im_start|>`, `<|im_end|>`).
+* **Parameter Budget:** Uses `tie_embeddings=True` on the 85M draft model:
+  $$\text{Embedding Parameters: } 151,936 \times 480 \approx 72.93\text{M}$$
+  $$\text{Transformer Layer Parameters: } 5 \times 2.42\text{M} \approx 12.10\text{M}$$
+  $$\text{Total Parameters (incl. final RMSNorm): } 72.93\text{M} + 12.10\text{M} \approx \mathbf{85.03\text{M Total}}\ (85{,}030{,}560)$$
 
 ---
 

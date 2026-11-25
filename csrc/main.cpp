@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
 
     std::cout << "Model loaded successfully in: " << std::fixed << std::setprecision(2) << load_ms << " ms" << std::endl;
     std::cout << "Architecture Specifications:" << std::endl;
-    std::cout << "  - Parameters: ~85M (tied embeddings)" << std::endl;
+    std::cout << "  - Embeddings: " << (engine.header.tie_embeddings ? "tied" : "untied") << std::endl;
     std::cout << "  - Vocabulary Size: " << engine.header.vocab_size << std::endl;
     std::cout << "  - Hidden Dimension: " << engine.header.d_model << std::endl;
     std::cout << "  - Transformer Layers: " << engine.header.n_layers << std::endl;

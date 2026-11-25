@@ -9,7 +9,7 @@ Generates Markdown results table and Matplotlib charts to results/benchmark_plot
 
 import os
 import time
-from typing import Dict, List
+from typing import Dict
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -151,7 +151,7 @@ def evaluate_benchmark(
             total_drafted = 0
             total_accepted = 0
 
-            for p_idx, prompt in enumerate(prompts):
+            for _p_idx, prompt in enumerate(prompts):
                 if hasattr(tokenizer, "apply_chat_template"):
                     formatted_p = tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False, add_generation_prompt=True)
                 else:

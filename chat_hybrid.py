@@ -16,7 +16,7 @@ import os
 import sys
 import time
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from config import get_qwen_85m_config
 from model import SmallLLM
@@ -34,9 +34,9 @@ def main():
     args = parser.parse_args()
 
     print("=" * 65)
-    print(f"  ⚡ HYBRID SPECULATIVE DECODING ENGINE (CPU + GPU)")
+    print("  ⚡ HYBRID SPECULATIVE DECODING ENGINE (CPU + GPU)")
     print(f"  Target Model: {args.target} [CPU / System RAM]")
-    print(f"  Draft Model:  Custom 85M LM [GTX 1050 GPU / VRAM]")
+    print("  Draft Model:  Custom 85M LM [GTX 1050 GPU / VRAM]")
     print("=" * 65)
 
     # 1. Load Tokenizer
@@ -116,7 +116,7 @@ def main():
         print("Response:")
         print(result["text"])
         print("-" * 65)
-        print(f"Hybrid Speculative Stats:")
+        print("Hybrid Speculative Stats:")
         print(f" • Generated:       {tokens_gen} tokens in {total_time:.2f}s")
         print(f" • Throughput:      {tok_per_sec:.2f} tokens/sec")
         print(f" • Accepted Tokens: {result['num_accepted']} / {result['num_drafted']} ({result['acceptance_rate']*100:.1f}%)")
