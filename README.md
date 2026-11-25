@@ -166,6 +166,22 @@ python tests/test_cpp_engine.py
 python benchmarks/benchmark_systems.py
 ```
 
+### Windows Download / Releases
+
+Prebuilt standalone Windows x86_64 binaries (`hybrid_infer.exe` for portable x86_64 CPUs, `hybrid_infer-avx2.exe` with AVX2 + FMA + OpenMP, and `SHA256SUMS.txt`) are available on the [GitHub Releases page](https://github.com/tahaenasraoui-debug/Hybrid-0.1-85M/releases/latest). Both executables are statically linked with zero external DLL dependencies.
+
+```powershell
+# Export FP32 weights once (from checkpoint) and run on Windows
+python scripts/export_weights_bin.py
+.\hybrid_infer-avx2.exe csrc\hybrid_85m_fp32.bin
+```
+
+You can also cross-compile `csrc/hybrid_infer.exe` from Linux using MinGW-w64:
+
+```bash
+make -C csrc windows
+```
+
 ---
 
 ## Quickstart

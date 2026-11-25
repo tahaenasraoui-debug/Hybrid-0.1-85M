@@ -27,9 +27,12 @@ results/*.png
 *.txt
 !requirements.txt
 
-# C/C++ Build Artifacts
+# C/C++ & Release Build Artifacts
 build/
+dist/
+*.spec
 *.o
+*.exe
 hybrid_infer
 csrc/hybrid_infer
 

@@ -9,16 +9,31 @@
 #include <string>
 #include <vector>
 
-#if defined(__AVX2__) && defined(__FMA__)
+#ifdef _WIN32
+#include <malloc.h>
+#endif
+
+#if (defined(__AVX2__) && defined(__FMA__)) || (defined(_MSC_VER) && defined(__AVX2__))
 #include <immintrin.h>
+#define HYBRID_USE_AVX2 1
 #endif
 
 #ifdef _OPENMP
 #include <omp.h>
+#ifdef _MSC_VER
+#define HYBRID_OMP_PRAGMA(x) __pragma(x)
+#else
 #define HYBRID_OMP_PRAGMA(x) _Pragma(#x)
+#endif
 #else
 #define HYBRID_OMP_PRAGMA(x)
 inline int omp_get_max_threads() { return 1; }
+#endif
+
+#if defined(_OPENMP) && _OPENMP >= 201307
+#define HYBRID_OMP_SIMD() HYBRID_OMP_PRAGMA(omp simd)
+#else
+#define HYBRID_OMP_SIMD()
 #endif
 
 inline float* alloc_aligned_floats(size_t num_floats) {
@@ -30,11 +45,26 @@ inline float* alloc_aligned_floats(size_t num_floats) {
         raw_bytes = 64;
     }
     size_t aligned_bytes = ((raw_bytes + 63) / 64) * 64;
+#ifdef _WIN32
+    void* ptr = _aligned_malloc(aligned_bytes, 64);
+#else
     void* ptr = std::aligned_alloc(64, aligned_bytes);
+#endif
     if (ptr) {
         std::memset(ptr, 0, aligned_bytes);
     }
     return static_cast<float*>(ptr);
+}
+
+inline void free_aligned_floats(void* ptr) {
+    if (!ptr) {
+        return;
+    }
+#ifdef _WIN32
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
 }
 
 struct ModelHeader {
@@ -89,7 +119,7 @@ struct KVCache {
 
     void free_mem() {
         if (data) {
-            std::free(data);
+            free_aligned_floats(data);
             data = nullptr;
         }
         seq_len = 0;
@@ -166,7 +196,7 @@ public:
 
     // Fast vector math helpers
     static inline float vec_dot(const float* a, const float* b, int n) {
-#if defined(__AVX2__) && defined(__FMA__)
+#ifdef HYBRID_USE_AVX2
         __m256 sum256 = _mm256_setzero_ps();
         int i = 0;
         for (; i <= n - 8; i += 8) {
@@ -198,7 +228,7 @@ public:
     }
 
     static inline void rmsnorm(float* out, const float* x, const float* weight, int dim, float eps) {
-#if defined(__AVX2__) && defined(__FMA__)
+#ifdef HYBRID_USE_AVX2
         __m256 sum256 = _mm256_setzero_ps();
         int i = 0;
         for (; i <= dim - 8; i += 8) {

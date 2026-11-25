@@ -7,7 +7,7 @@ namespace {
 
 inline void free_and_null(float*& ptr) {
     if (ptr) {
-        std::free(ptr);
+        free_aligned_floats(ptr);
         ptr = nullptr;
     }
 }
@@ -18,12 +18,12 @@ float* alloc_and_read(std::ifstream& file, size_t num_floats) {
         return nullptr;
     }
     if (num_floats > static_cast<size_t>(std::numeric_limits<std::streamsize>::max()) / sizeof(float)) {
-        std::free(ptr);
+        free_aligned_floats(ptr);
         return nullptr;
     }
     std::streamsize bytes = static_cast<std::streamsize>(num_floats * sizeof(float));
     if (!file.read(reinterpret_cast<char*>(ptr), bytes)) {
-        std::free(ptr);
+        free_aligned_floats(ptr);
         return nullptr;
     }
     return ptr;
@@ -343,7 +343,7 @@ int HybridInferenceEngine::forward_token(int token_id, bool compute_full_logits)
             for (int t = 0; t < total_kv_len; ++t) {
                 const float* v_cached = kv_cache.get_v_ptr(l, t) + kv_h * head_dim;
                 float weight = act_scores[t];
-                HYBRID_OMP_PRAGMA(omp simd)
+                HYBRID_OMP_SIMD()
                 for (int d = 0; d < head_dim; ++d) {
                     out_head[d] += weight * v_cached[d];
                 }
@@ -354,7 +354,7 @@ int HybridInferenceEngine::forward_token(int token_id, bool compute_full_logits)
         gemv(act_o_out, lw.o_proj, act_attn_out, d_model, n_heads * head_dim);
 
         // Residual connection
-        HYBRID_OMP_PRAGMA(omp simd)
+        HYBRID_OMP_SIMD()
         for (int i = 0; i < d_model; ++i) {
             act_x[i] += act_o_out[i];
         }
@@ -367,7 +367,7 @@ int HybridInferenceEngine::forward_token(int token_id, bool compute_full_logits)
         gemv(act_w3, lw.w3, act_norm_x, hidden_dim, d_model);
 
         // Fused SiLU * up
-        HYBRID_OMP_PRAGMA(omp simd)
+        HYBRID_OMP_SIMD()
         for (int i = 0; i < hidden_dim; ++i) {
             act_w1[i] = silu(act_w1[i]) * act_w3[i];
         }
@@ -376,7 +376,7 @@ int HybridInferenceEngine::forward_token(int token_id, bool compute_full_logits)
         gemv(act_ffn_out, lw.w2, act_w1, d_model, hidden_dim);
 
         // Residual connection
-        HYBRID_OMP_PRAGMA(omp simd)
+        HYBRID_OMP_SIMD()
         for (int i = 0; i < d_model; ++i) {
             act_x[i] += act_ffn_out[i];
         }

@@ -4,8 +4,23 @@
 #include <chrono>
 #include <vector>
 #include <numeric>
+#include <ostream>
+#include <string>
+
+static void print_usage(const char* prog, std::ostream& os) {
+    const char* exe = (prog && *prog) ? prog : "hybrid_infer";
+    os << "Usage: " << exe << " [model_bin_path]\n"
+       << "  model_bin_path  Path to exported FP32 binary weights "
+       << "(default: csrc/hybrid_85m_fp32.bin)\n"
+       << "  -h, --help      Display this usage message" << std::endl;
+}
 
 int main(int argc, char** argv) {
+    if (argc > 1 && (std::string(argv[1]) == "-h" || std::string(argv[1]) == "--help")) {
+        print_usage(argv[0], std::cout);
+        return 0;
+    }
+
     std::string bin_path = "csrc/hybrid_85m_fp32.bin";
     if (argc > 1) {
         bin_path = argv[1];
@@ -21,6 +36,7 @@ int main(int argc, char** argv) {
     auto t_load_start = std::chrono::high_resolution_clock::now();
     if (!engine.load_from_binary(bin_path)) {
         std::cerr << "Error: Failed to load model from " << bin_path << std::endl;
+        print_usage(argv[0], std::cerr);
         return 1;
     }
     auto t_load_end = std::chrono::high_resolution_clock::now();

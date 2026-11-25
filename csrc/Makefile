@@ -27,6 +27,8 @@ CXXFLAGS ?= -O3 $(ARCH_FLAGS) $(OMP_FLAGS) -Wall -Wextra -std=c++17
 INCLUDES = -I.
 
 TARGET = hybrid_infer
+WIN_CXX ?= x86_64-w64-mingw32-g++
+WIN_TARGET = hybrid_infer.exe
 
 SRCS = main.cpp engine.cpp
 OBJS = $(SRCS:.cpp=.o)
@@ -39,7 +41,10 @@ $(TARGET): $(OBJS)
 %.o: %.cpp engine.h
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-clean:
-	rm -f $(OBJS) $(TARGET)
+windows: $(SRCS) engine.h
+	$(WIN_CXX) -std=c++17 -O3 -Wall -Wextra -I. -static -static-libgcc -static-libstdc++ $(SRCS) -o $(WIN_TARGET)
 
-.PHONY: all clean
+clean:
+	rm -f $(OBJS) $(TARGET) *.exe
+
+.PHONY: all clean windows
