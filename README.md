@@ -211,3 +211,25 @@ python benchmarks/run_bench.py --max_tokens 32
 ```bash
 python chat_speculative.py --k 4
 ```
+
+---
+
+## Contributing
+
+Contributions, bug reports, and feature suggestions are welcome. For larger changes or new features, please open an issue first to discuss the approach before writing code.
+
+1. Fork the repository and create a branch from `main` (e.g., `git checkout -b fix/short-description` or `feat/short-description`).
+2. Keep pull requests focused on a single change and follow the existing code style.
+3. Run the local checks before opening a PR:
+
+   ```bash
+   uvx ruff check .
+   make -C csrc
+   PYTHONPATH=. pytest -v
+   ```
+
+4. Open a Pull Request describing what changed and why (link any related issue).
+
+Do not commit model weights, checkpoints, or large binary artifacts.
+
+When reporting bugs, please include steps to reproduce, expected vs. actual behavior, and your environment details (OS, Python/PyTorch version, and C++ compiler).
